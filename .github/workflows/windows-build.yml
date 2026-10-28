@@ -32,6 +32,7 @@ jobs:
             ~/.cargo/git
             src-tauri/target
           key: windows-x64-rust-1.88-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: windows-x64-rust-1.88-
       - run: npm ci
       - name: Check and test
         run: |
@@ -39,6 +40,16 @@ jobs:
           cargo test --manifest-path src-tauri/Cargo.toml --locked
       - name: Build NSIS installer
         run: npm run package:windows -- --ci
+      - name: Install and verify bookshelf startup
+        shell: pwsh
+        run: ./.github/scripts/windows-startup-smoke.ps1
+      - name: Upload startup diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-startup-diagnostics
+          path: ${{ runner.temp }}/fishbaby-startup.log
+          if-no-files-found: ignore
       - name: Installer checksum
         shell: pwsh
         run: |

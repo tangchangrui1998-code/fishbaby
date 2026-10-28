@@ -4,7 +4,7 @@ use sha2::{Digest, Sha256};
 use std::{
     fs,
     path::PathBuf,
-    sync::Mutex,
+    sync::{Mutex, OnceLock},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tauri::{Emitter, Manager};
@@ -74,6 +74,70 @@ struct Store {
     library: Mutex<Library>,
     file: PathBuf,
     mode: Mutex<ReaderSession>,
+}
+static STARTUP_LOG: OnceLock<PathBuf> = OnceLock::new();
+fn startup_log(message: &str) {
+    use std::io::Write;
+    if let Some(path) = STARTUP_LOG.get() {
+        if let Ok(mut file) = fs::OpenOptions::new().create(true).append(true).open(path) {
+            let _ = writeln!(file, "{} {message}", now());
+        }
+    }
+}
+#[tauri::command]
+fn frontend_ready(window: tauri::WebviewWindow) {
+    startup_log(&format!("frontend-ready {}", window.label()));
+}
+fn ensure_reader(app: &tauri::AppHandle) -> Result<(), String> {
+    if app.get_webview_window("reader").is_some() {
+        return Ok(());
+    }
+    startup_log("reader-create-start");
+    let config = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|w| w.label == "reader")
+        .ok_or("缺少阅读窗口配置")?;
+    tauri::WebviewWindowBuilder::from_config(app, config)
+        .map_err(|e| e.to_string())?
+        .build()
+        .map_err(|e| e.to_string())?;
+    configure_reader(app).map_err(|e| e.to_string())?;
+    startup_log("reader-create-complete");
+    Ok(())
+}
+fn configure_reader(app: &tauri::AppHandle) -> tauri::Result<()> {
+    let s = app
+        .state::<Store>()
+        .library
+        .lock()
+        .unwrap()
+        .settings
+        .clone();
+    let w = app.get_webview_window("reader").expect("reader exists");
+    w.set_size(tauri::LogicalSize::new(s.width, s.height))?;
+    if let (Some(x), Some(y)) = (s.x, s.y) {
+        w.set_position(tauri::LogicalPosition::new(x, y))?;
+        let pos = w.outer_position()?;
+        let size = w.outer_size()?;
+        let visible = w.available_monitors()?.iter().any(|m| {
+            let p = m.position();
+            let z = m.size();
+            pos.x + size.width as i32 > p.x
+                && pos.y + size.height as i32 > p.y
+                && pos.x < p.x + z.width as i32
+                && pos.y < p.y + z.height as i32
+        });
+        if !visible {
+            w.center()?;
+        }
+    } else {
+        w.center()?;
+    }
+    w.set_ignore_cursor_events(true)?;
+    Ok(())
 }
 fn now() -> u64 {
     SystemTime::now()
@@ -169,7 +233,8 @@ fn import_books(app: tauri::AppHandle, paths: Vec<String>) -> Result<Vec<String>
     Ok(errors)
 }
 #[tauri::command]
-fn read_book(app: tauri::AppHandle, id: String) -> Result<(Book, String, bool), String> {
+async fn read_book(app: tauri::AppHandle, id: String) -> Result<(Book, String, bool), String> {
+    ensure_reader(&app)?;
     let store = app.state::<Store>();
     let mut data = store.library.lock().unwrap();
     let b = data
@@ -409,10 +474,27 @@ impl ReaderSession {
 }
 
 fn main() {
+    let log = std::env::var_os("FISHBABY_STARTUP_LOG")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            std::env::var_os("LOCALAPPDATA")
+                .map(PathBuf::from)
+                .unwrap_or_else(std::env::temp_dir)
+                .join("com.fishbaby.reader")
+                .join("logs")
+                .join("startup.log")
+        });
+    if let Some(parent) = log.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let _ = STARTUP_LOG.set(log);
+    startup_log("process-start");
+    std::panic::set_hook(Box::new(|info| startup_log(&format!("panic {info}"))));
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
+            frontend_ready,
             library,
             import_books,
             read_book,
@@ -427,6 +509,7 @@ fn main() {
             return_to_shelf
         ])
         .setup(|app| {
+            startup_log("setup-start");
             let dir = app.path().app_data_dir()?;
             fs::create_dir_all(&dir)?;
             let file = dir.join("library.json");
@@ -435,33 +518,16 @@ fn main() {
             } else {
                 Library::default()
             };
-            let s = data.settings.clone();
             app.manage(Store {
                 library: Mutex::new(data),
                 file,
                 mode: Mutex::new(ReaderSession::new("paused")),
             });
-            let w = app.get_webview_window("reader").unwrap();
-            w.set_size(tauri::LogicalSize::new(s.width, s.height))?;
-            if let (Some(x), Some(y)) = (s.x, s.y) {
-                w.set_position(tauri::LogicalPosition::new(x, y))?;
-                let pos = w.outer_position()?;
-                let size = w.outer_size()?;
-                let visible = w.available_monitors()?.iter().any(|m| {
-                    let p = m.position();
-                    let z = m.size();
-                    pos.x + size.width as i32 > p.x
-                        && pos.y + size.height as i32 > p.y
-                        && pos.x < p.x + z.width as i32
-                        && pos.y < p.y + z.height as i32
-                });
-                if !visible {
-                    w.center()?;
-                }
-            } else {
-                w.center()?;
+            // Windows starts one WebView only. The reader is created by async read_book.
+            if app.get_webview_window("reader").is_some() {
+                configure_reader(app.handle())?;
             }
-            w.set_ignore_cursor_events(true)?;
+            startup_log("store-ready");
             use tauri::menu::{Menu, MenuItem};
             let shelf = MenuItem::with_id(app, "shelf", "打开书架", true, None::<&str>)?;
             let pause = MenuItem::with_id(app, "pause", "暂停 / 继续阅读", true, None::<&str>)?;
@@ -498,6 +564,7 @@ fn main() {
                     _ => {}
                 })
                 .build(app)?;
+            startup_log("tray-ready");
             app.global_shortcut()
                 .on_shortcut("CommandOrControl+Shift+H", |app, _, event| {
                     if event.state() == ShortcutState::Pressed {
@@ -514,6 +581,7 @@ fn main() {
                         open_shelf(app);
                     }
                 })?;
+            startup_log("shortcuts-ready");
             let handle = app.handle().clone();
             std::thread::spawn(move || {
                 let mut previous = (String::new(), false);
@@ -521,7 +589,7 @@ fn main() {
                     std::thread::sleep(Duration::from_millis(30));
                     let store = handle.state::<Store>();
                     let Some(w) = handle.get_webview_window("reader") else {
-                        break;
+                        continue;
                     };
                     let window_scale = w.scale_factor().unwrap_or(1.);
                     #[cfg(target_os = "macos")]
@@ -568,6 +636,7 @@ fn main() {
                     }
                 }
             });
+            startup_log("setup-complete");
             Ok(())
         })
         .on_window_event(|w, event| {
@@ -578,25 +647,32 @@ fn main() {
                 }
             }
             if w.label() == "reader" {
-                if let Some(store) = w.try_state::<Store>() {
-                    let scale = w.scale_factor().unwrap_or(1.);
-                    match event {
-                        tauri::WindowEvent::Moved(p) => {
+                let geometry = match event {
+                    tauri::WindowEvent::Moved(p) => Some((Some(*p), None)),
+                    tauri::WindowEvent::Resized(size) if size.width > 0 && size.height > 0 => {
+                        Some((None, Some(*size)))
+                    }
+                    _ => None,
+                };
+                if let Some((position, size)) = geometry {
+                    let w = w.clone();
+                    tauri::async_runtime::spawn(async move {
+                        if let Some(store) = w.try_state::<Store>() {
+                            let scale = w.scale_factor().unwrap_or(1.);
                             let mut data = store.library.lock().unwrap();
-                            data.settings.x = Some(p.x as f64 / scale);
-                            data.settings.y = Some(p.y as f64 / scale);
-                            let _ = persist(&store, &data);
-                        }
-                        tauri::WindowEvent::Resized(size) if size.width > 0 && size.height > 0 => {
-                            let mut data = store.library.lock().unwrap();
-                            data.settings.width = size.width as f64 / scale;
-                            data.settings.height = size.height as f64 / scale;
+                            if let Some(p) = position {
+                                data.settings.x = Some(p.x as f64 / scale);
+                                data.settings.y = Some(p.y as f64 / scale);
+                            }
+                            if let Some(s) = size {
+                                data.settings.width = s.width as f64 / scale;
+                                data.settings.height = s.height as f64 / scale;
+                            }
                             let _ = persist(&store, &data);
                             drop(data);
                             changed(w.app_handle());
                         }
-                        _ => {}
-                    }
+                    });
                 }
             }
         })
@@ -756,6 +832,23 @@ mod tests {
             "reading"
         );
         assert!(!reader_mounted("paused", "hidden"));
+    }
+    #[test]
+    fn windows_boot_creates_only_bookshelf_webview() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.windows.conf.json")).unwrap();
+        let windows = config["app"]["windows"].as_array().unwrap();
+        assert_eq!(
+            windows
+                .iter()
+                .filter(|w| w["create"].as_bool().unwrap_or(true))
+                .count(),
+            1
+        );
+        assert_eq!(
+            windows.iter().find(|w| w["label"] == "reader").unwrap()["create"],
+            false
+        );
     }
     #[test]
     fn older_settings_default_to_light_and_themes_roundtrip() {

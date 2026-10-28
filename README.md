@@ -66,3 +66,9 @@ Windows 在 GitHub 上手动构建：
 工作流使用 Windows Server 2022、Node.js 22 和 Rust 1.88，运行测试后打 NSIS x64 安装包。安装范围为当前用户；未安装 WebView2 时会下载其安装引导程序。无需配置发布或签名密钥；安装包保留 30 天，不自动发布 GitHub Release。
 
 本地 Windows 构建需 Visual Studio C++ Build Tools、WebView2 和 Rust MSVC 工具链，命令为 `npm run package:windows -- --ci`。
+
+### Windows 0.1.1 启动修复
+
+Windows 启动时先创建书架，阅读窗口在选书后异步创建；窗口尺寸事件转到后台处理，避免在原生窗口回调中执行同步查询。Actions 增加静默安装与启动检查，只有收到书架页面的 `frontend-ready main` 确认才通过，启动日志会作为 `windows-startup-diagnostics` 附件保留。
+
+若 Windows 仍出现持续白屏，可查看 `%LOCALAPPDATA%\com.fishbaby.reader\logs\startup.log` 的最后几行；日志只记录启动阶段，不记录书籍正文。

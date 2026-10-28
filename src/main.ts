@@ -502,5 +502,12 @@ async function boot() {
     await loadCurrent();
   } else renderShelf();
   await listen("library-changed", () => void refresh());
+  await invoke("frontend_ready");
 }
-void boot().catch(toast);
+void boot().catch((error) => {
+  if (!root.textContent?.trim())
+    root.innerHTML = `<div class="browser-note"><h1>启动未完成</h1><p></p></div>`;
+  const target = root.querySelector(".browser-note p");
+  if (target) target.textContent = String(error);
+  toast(error);
+});
