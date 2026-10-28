@@ -336,11 +336,20 @@ function renderReader() {
     .querySelector("#start")!
     .addEventListener("click", () =>
       action(() =>
-        invoke("set_mode", {
-          mode: readerState === "reading" ? "ready" : "hover",
-        }),
+        readerState === "reading"
+          ? invoke("set_mode", { mode: "ready" })
+          : invoke("start_reading"),
       ),
     );
+  const overlay = document.querySelector("#overlay")!;
+  overlay.addEventListener(
+    "pointerenter",
+    () => void action(() => invoke("reader_pointer", { inside: true })),
+  );
+  overlay.addEventListener(
+    "pointerleave",
+    () => void action(() => invoke("reader_pointer", { inside: false })),
+  );
   document.querySelector(".drag")!.addEventListener("mousedown", (e) => {
     if ((e.target as HTMLElement).closest("button")) return;
     void getCurrentWindow().startDragging();

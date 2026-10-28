@@ -306,6 +306,21 @@ fn save_settings(app: tauri::AppHandle, mut settings: Settings) -> Result<(), St
 }
 #[tauri::command]
 fn set_mode(app: tauri::AppHandle, mode: String) -> Result<(), String> {
+    change_mode(app, mode, None)
+}
+#[tauri::command]
+fn start_reading(app: tauri::AppHandle) -> Result<(), String> {
+    change_mode(app, "hover".into(), Some(true))
+}
+#[tauri::command]
+fn reader_pointer(app: tauri::AppHandle, inside: bool) {
+    app.state::<Store>().mode.lock().unwrap().pointer_inside = Some(inside);
+}
+fn change_mode(
+    app: tauri::AppHandle,
+    mode: String,
+    pointer_inside: Option<bool>,
+) -> Result<(), String> {
     if !["paused", "ready", "hover", "setup"].contains(&mode.as_str()) {
         return Err("无效状态".into());
     }
@@ -315,10 +330,14 @@ fn set_mode(app: tauri::AppHandle, mode: String) -> Result<(), String> {
     }
     if mode == "ready" || mode == "hover" {
         if let Some(shelf) = app.get_webview_window("main") {
-            shelf.minimize().map_err(|e| e.to_string())?;
+            if !shelf.is_minimized().map_err(|e| e.to_string())? {
+                shelf.minimize().map_err(|e| e.to_string())?;
+            }
         }
     }
-    *store.mode.lock().unwrap() = ReaderSession::new(&mode);
+    let mut session = ReaderSession::new(&mode);
+    session.pointer_inside = pointer_inside;
+    *store.mode.lock().unwrap() = session;
     Ok(())
 }
 #[tauri::command]
@@ -339,25 +358,47 @@ fn return_to_shelf(app: tauri::AppHandle) {
     open_shelf(&app);
 }
 
+// macOS cursor positions use the primary display scale; window bounds use
+// the scale of the display hosting that window. Compare in logical coordinates.
+fn cursor_in_reader(
+    cursor: (f64, f64),
+    cursor_scale: f64,
+    origin: (f64, f64),
+    size: (f64, f64),
+    window_scale: f64,
+) -> bool {
+    let p = (cursor.0 / cursor_scale, cursor.1 / cursor_scale);
+    let o = (origin.0 / window_scale, origin.1 / window_scale);
+    let s = (size.0 / window_scale, size.1 / window_scale);
+    p.0 >= o.0 && p.1 >= o.1 && p.0 < o.0 + s.0 && p.1 < o.1 + s.1
+}
+
 // Preview remains visible. Only explicit Start Reading enables hover hiding.
 struct ReaderSession {
     name: String,
     entered_at: Option<Instant>,
+    pointer_inside: Option<bool>,
 }
 impl ReaderSession {
     fn new(name: &str) -> Self {
         Self {
             name: name.into(),
+            pointer_inside: None,
             // Starting from the reader button should not flash hidden for 150 ms.
             entered_at: (name == "hover").then(|| Instant::now() - Duration::from_millis(150)),
         }
     }
-    fn update(&mut self, inside: bool, now: Instant) -> &'static str {
+    fn reopen_shelf_on_activation(&self) -> bool {
+        self.name == "paused"
+    }
+    fn update(&mut self, global_inside: bool, now: Instant) -> &'static str {
+        let inside = self.pointer_inside.unwrap_or(global_inside);
         match self.name.as_str() {
             "ready" => "ready",
             "setup" => "setup",
             "hover" => {
                 if !inside {
+                    self.pointer_inside = None;
                     self.entered_at = None;
                     return "hidden";
                 }
@@ -386,6 +427,8 @@ fn main() {
             edit_book,
             save_settings,
             set_mode,
+            start_reading,
+            reader_pointer,
             reset_position,
             return_to_shelf
         ])
@@ -486,13 +529,23 @@ fn main() {
                     let Some(w) = handle.get_webview_window("reader") else {
                         break;
                     };
+                    let window_scale = w.scale_factor().unwrap_or(1.);
+                    let cursor_scale = handle
+                        .primary_monitor()
+                        .ok()
+                        .flatten()
+                        .map(|m| m.scale_factor())
+                        .unwrap_or(window_scale);
                     let inside = if let (Ok(p), Ok(o), Ok(s)) =
                         (handle.cursor_position(), w.outer_position(), w.outer_size())
                     {
-                        p.x >= o.x as f64
-                            && p.y >= o.y as f64
-                            && p.x < (o.x as f64 + s.width as f64)
-                            && p.y < (o.y as f64 + s.height as f64)
+                        cursor_in_reader(
+                            (p.x, p.y),
+                            cursor_scale,
+                            (o.x as f64, o.y as f64),
+                            (s.width as f64, s.height as f64),
+                            window_scale,
+                        )
                     } else {
                         false
                     };
@@ -534,7 +587,17 @@ fn main() {
         .expect("启动隐阅失败")
         .run(|app, event| {
             if let tauri::RunEvent::Reopen { .. } = event {
-                open_shelf(app);
+                // Reactivating a reader window must not act like Return to Bookshelf.
+                // Drop the session lock before window operations dispatch native events.
+                let reopen = app
+                    .state::<Store>()
+                    .mode
+                    .lock()
+                    .unwrap()
+                    .reopen_shelf_on_activation();
+                if reopen {
+                    open_shelf(app);
+                }
             }
         });
 }
@@ -581,6 +644,63 @@ mod tests {
         assert_eq!(reopened.update(false, now), "ready");
         assert_eq!(reopened.update(true, now), "ready");
         assert_eq!(reopened.update(false, now), "ready");
+    }
+    #[test]
+    fn activation_never_returns_an_active_reader_to_bookshelf() {
+        for mode in ["ready", "setup", "hover"] {
+            let mut session = ReaderSession::new(mode);
+            let now = Instant::now();
+            assert!(!session.reopen_shelf_on_activation());
+            if mode == "hover" {
+                assert_eq!(session.update(true, now), "reading");
+                assert!(!session.reopen_shelf_on_activation());
+                assert_eq!(session.update(false, now), "hidden");
+                assert!(!session.reopen_shelf_on_activation());
+            }
+        }
+        assert!(ReaderSession::new("paused").reopen_shelf_on_activation());
+    }
+    #[test]
+    fn pointer_hit_test_handles_mixed_display_scales() {
+        for (cursor_scale, window_scale) in [(1., 1.), (2., 1.), (1., 2.), (2., 2.)] {
+            let origin = (300. * window_scale, 200. * window_scale);
+            let size = (420. * window_scale, 160. * window_scale);
+            assert!(cursor_in_reader(
+                (400. * cursor_scale, 250. * cursor_scale),
+                cursor_scale,
+                origin,
+                size,
+                window_scale
+            ));
+            assert!(!cursor_in_reader(
+                (725. * cursor_scale, 250. * cursor_scale),
+                cursor_scale,
+                origin,
+                size,
+                window_scale
+            ));
+            assert!(!cursor_in_reader(
+                (400. * cursor_scale, 365. * cursor_scale),
+                cursor_scale,
+                origin,
+                size,
+                window_scale
+            ));
+        }
+    }
+    #[test]
+    fn start_click_uses_reader_pointer_until_exit_then_global_position_can_wake_it() {
+        let mut session = ReaderSession::new("hover");
+        let now = Instant::now();
+        session.pointer_inside = Some(true);
+        assert_eq!(session.update(false, now), "reading");
+        session.pointer_inside = Some(false);
+        assert_eq!(session.update(false, now), "hidden");
+        assert_eq!(session.update(true, now), "hidden");
+        assert_eq!(
+            session.update(true, now + Duration::from_millis(150)),
+            "reading"
+        );
     }
     #[test]
     fn older_settings_default_to_light_and_themes_roundtrip() {
