@@ -382,8 +382,9 @@ footer {
   font-size: 10px;
   flex-shrink: 0;
 }
+.reader #overlay.ready,
 .reader #overlay.setup {
-  border: 1px dashed #719676;
+  border: 1px solid var(--reader-chrome);
   border-radius: 6px;
   background: rgba(var(--reader-surface), 0.96) !important;
 }
@@ -414,9 +415,6 @@ footer {
 }
 
 .reader #start {
-  display: none;
-}
-.reader .setup #start {
   display: inline-block;
 }
 .reader .drag span {

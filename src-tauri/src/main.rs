@@ -73,7 +73,7 @@ struct Library {
 struct Store {
     library: Mutex<Library>,
     file: PathBuf,
-    mode: Mutex<String>,
+    mode: Mutex<ReaderSession>,
 }
 fn now() -> u64 {
     SystemTime::now()
@@ -200,8 +200,8 @@ fn read_book(app: tauri::AppHandle, id: String) -> Result<(Book, String, bool), 
     drop(data);
     changed(&app);
     let _ = app.emit("book-changed", &book.id);
-    // Reading always enters hover mode; setup is an explicit adjustment action.
-    set_mode(app.clone(), "hover".into())?;
+    // Selecting a book opens a visible preview. Hover mode requires the reader button.
+    set_mode(app.clone(), "ready".into())?;
     Ok((book, text, modified))
 }
 #[tauri::command]
@@ -250,7 +250,7 @@ fn edit_book(
         data.books.retain(|b| b.id != id);
         if data.active_id.as_ref() == Some(&id) {
             data.active_id = None;
-            *store.mode.lock().unwrap() = "paused".into();
+            *store.mode.lock().unwrap() = ReaderSession::new("paused");
             let _ = app.emit("book-changed", "");
         }
     } else {
@@ -306,19 +306,19 @@ fn save_settings(app: tauri::AppHandle, mut settings: Settings) -> Result<(), St
 }
 #[tauri::command]
 fn set_mode(app: tauri::AppHandle, mode: String) -> Result<(), String> {
-    if !["paused", "hover", "setup"].contains(&mode.as_str()) {
+    if !["paused", "ready", "hover", "setup"].contains(&mode.as_str()) {
         return Err("无效状态".into());
     }
     let store = app.state::<Store>();
     if mode != "paused" && store.library.lock().unwrap().active_id.is_none() {
         return Err("请先选择一本书".into());
     }
-    if mode == "hover" {
+    if mode == "ready" || mode == "hover" {
         if let Some(shelf) = app.get_webview_window("main") {
-            shelf.hide().map_err(|e| e.to_string())?;
+            shelf.minimize().map_err(|e| e.to_string())?;
         }
     }
-    *store.mode.lock().unwrap() = mode;
+    *store.mode.lock().unwrap() = ReaderSession::new(&mode);
     Ok(())
 }
 #[tauri::command]
@@ -327,20 +327,49 @@ fn reset_position(app: tauri::AppHandle) -> Result<(), String> {
     w.center().map_err(|e| e.to_string())
 }
 fn open_shelf(app: &tauri::AppHandle) {
-    *app.state::<Store>().mode.lock().unwrap() = "paused".into();
+    *app.state::<Store>().mode.lock().unwrap() = ReaderSession::new("paused");
     if let Some(w) = app.get_webview_window("main") {
+        let _ = w.unminimize();
         let _ = w.show();
         let _ = w.set_focus();
     }
 }
-// Keeping this decision separate prevents adjustment mode from leaking into reading.
-fn reader_state(mode: &str, inside: bool, dwell: Option<Duration>) -> &'static str {
-    if mode == "setup" {
-        "setup"
-    } else if mode == "hover" && inside && dwell.is_some_and(|t| t >= Duration::from_millis(150)) {
-        "reading"
-    } else {
-        "hidden"
+#[tauri::command]
+fn return_to_shelf(app: tauri::AppHandle) {
+    open_shelf(&app);
+}
+
+// Preview remains visible. Only explicit Start Reading enables hover hiding.
+struct ReaderSession {
+    name: String,
+    entered_at: Option<Instant>,
+}
+impl ReaderSession {
+    fn new(name: &str) -> Self {
+        Self {
+            name: name.into(),
+            // Starting from the reader button should not flash hidden for 150 ms.
+            entered_at: (name == "hover").then(|| Instant::now() - Duration::from_millis(150)),
+        }
+    }
+    fn update(&mut self, inside: bool, now: Instant) -> &'static str {
+        match self.name.as_str() {
+            "ready" => "ready",
+            "setup" => "setup",
+            "hover" => {
+                if !inside {
+                    self.entered_at = None;
+                    return "hidden";
+                }
+                let entered = self.entered_at.get_or_insert(now);
+                if now.saturating_duration_since(*entered) >= Duration::from_millis(150) {
+                    "reading"
+                } else {
+                    "hidden"
+                }
+            }
+            _ => "hidden",
+        }
     }
 }
 
@@ -357,7 +386,8 @@ fn main() {
             edit_book,
             save_settings,
             set_mode,
-            reset_position
+            reset_position,
+            return_to_shelf
         ])
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
@@ -372,7 +402,7 @@ fn main() {
             app.manage(Store {
                 library: Mutex::new(data),
                 file,
-                mode: Mutex::new("paused".into()),
+                mode: Mutex::new(ReaderSession::new("paused")),
             });
             let w = app.get_webview_window("reader").unwrap();
             w.set_size(tauri::LogicalSize::new(s.width, s.height))?;
@@ -418,7 +448,7 @@ fn main() {
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "shelf" => open_shelf(app),
                     "pause" => {
-                        let mode = app.state::<Store>().mode.lock().unwrap().clone();
+                        let mode = app.state::<Store>().mode.lock().unwrap().name.clone();
                         let _ = set_mode(
                             app.clone(),
                             if mode == "paused" { "hover" } else { "paused" }.into(),
@@ -434,7 +464,7 @@ fn main() {
             app.global_shortcut()
                 .on_shortcut("CommandOrControl+Shift+H", |app, _, event| {
                     if event.state() == ShortcutState::Pressed {
-                        let mode = app.state::<Store>().mode.lock().unwrap().clone();
+                        let mode = app.state::<Store>().mode.lock().unwrap().name.clone();
                         let _ = set_mode(
                             app.clone(),
                             if mode == "paused" { "hover" } else { "paused" }.into(),
@@ -449,12 +479,10 @@ fn main() {
                 })?;
             let handle = app.handle().clone();
             std::thread::spawn(move || {
-                let mut entered: Option<Instant> = None;
                 let mut previous = String::new();
                 loop {
                     std::thread::sleep(Duration::from_millis(30));
                     let store = handle.state::<Store>();
-                    let mode = store.mode.lock().unwrap().clone();
                     let Some(w) = handle.get_webview_window("reader") else {
                         break;
                     };
@@ -468,14 +496,9 @@ fn main() {
                     } else {
                         false
                     };
-                    if mode == "hover" && inside {
-                        entered.get_or_insert_with(Instant::now);
-                    } else {
-                        entered = None;
-                    }
-                    let state = reader_state(&mode, inside, entered.map(|t| t.elapsed()));
+                    let state = store.mode.lock().unwrap().update(inside, Instant::now());
                     if previous != state {
-                        let _ = w.set_focusable(state == "setup");
+                        let _ = w.set_focusable(state == "setup" || state == "ready");
                         let _ = w.set_ignore_cursor_events(state == "hidden");
                         if state == "hidden" {
                             let _ = w.hide();
@@ -520,26 +543,44 @@ fn main() {
 mod tests {
     use super::*;
     #[test]
-    fn hover_hides_immediately_on_exit_and_can_be_reentered() {
-        for _ in 0..30 {
+    fn selecting_book_stays_visible_until_explicit_start() {
+        let start = Instant::now();
+        let mut session = ReaderSession::new("ready");
+        for inside in [false, true, false, true, false] {
             assert_eq!(
-                reader_state("hover", true, Some(Duration::from_millis(120))),
-                "hidden"
-            );
-            assert_eq!(
-                reader_state("hover", true, Some(Duration::from_millis(150))),
-                "reading"
-            );
-            assert_eq!(
-                reader_state("hover", false, Some(Duration::from_secs(3))),
-                "hidden"
+                session.update(inside, start + Duration::from_secs(60)),
+                "ready"
             );
         }
+        session = ReaderSession::new("hover");
+        let start = Instant::now();
+        assert_eq!(session.update(true, start), "reading");
         assert_eq!(
-            reader_state("paused", true, Some(Duration::from_secs(3))),
+            session.update(false, start + Duration::from_secs(1)),
             "hidden"
         );
-        assert_eq!(reader_state("setup", false, None), "setup");
+        assert_eq!(
+            session.update(true, start + Duration::from_secs(2)),
+            "hidden"
+        );
+        assert_eq!(
+            session.update(true, start + Duration::from_millis(2150)),
+            "reading"
+        );
+        assert_eq!(
+            session.update(false, start + Duration::from_secs(3)),
+            "hidden"
+        );
+    }
+    #[test]
+    fn returning_to_shelf_hides_reader_and_reopening_requires_start_again() {
+        let now = Instant::now();
+        assert_eq!(ReaderSession::new("paused").update(true, now), "hidden");
+        assert_eq!(ReaderSession::new("setup").update(false, now), "setup");
+        let mut reopened = ReaderSession::new("ready");
+        assert_eq!(reopened.update(false, now), "ready");
+        assert_eq!(reopened.update(true, now), "ready");
+        assert_eq!(reopened.update(false, now), "ready");
     }
     #[test]
     fn older_settings_default_to_light_and_themes_roundtrip() {

@@ -102,7 +102,7 @@ function renderBooks() {
     ? books
         .map(
           (b, i) =>
-            `<article class="book ${data.activeId === b.id ? "active" : ""}"><div class="cover c${i % 4}"><span>TXT / ${String(i + 1).padStart(2, "0")}</span><strong>${esc(b.title)}</strong><i>隐 阅</i></div><div class="book-info"><h3>${esc(b.title)}</h3><p class="path" title="${esc(b.path)}">${esc(b.path)}</p><div class="progress"><span style="width:${percent(b)}%"></span></div><p>${data.activeId === b.id ? "正在阅读 · " : ""}${percent(b)}% ${b.available ? "" : " · 文件不可用"} <span>${b.lastRead ? new Date(b.lastRead * 1000).toLocaleDateString("zh-CN") : "尚未开始"}</span></p><button class="read primary" data-id="${b.id}">${b.offset ? "继续阅读" : "开始阅读"} ↗</button><div class="book-actions"><button data-rename="${b.id}">改名</button><button data-relocate="${b.id}">重新定位</button><button data-remove="${b.id}">移出</button></div></div></article>`,
+            `<article class="book ${data.activeId === b.id ? "active" : ""}"><div class="cover c${i % 4}"><span>TXT / ${String(i + 1).padStart(2, "0")}</span><strong>${esc(b.title)}</strong><i>隐 阅</i></div><div class="book-info"><h3>${esc(b.title)}</h3><p class="path" title="${esc(b.path)}">${esc(b.path)}</p><div class="progress"><span style="width:${percent(b)}%"></span></div><p>${data.activeId === b.id ? "正在阅读 · " : ""}${percent(b)}% ${b.available ? "" : " · 文件不可用"} <span>${b.lastRead ? new Date(b.lastRead * 1000).toLocaleDateString("zh-CN") : "尚未开始"}</span></p><button class="read primary" data-id="${b.id}">${b.offset ? "继续阅读" : "阅读"} ↗</button><div class="book-actions"><button data-rename="${b.id}">改名</button><button data-relocate="${b.id}">重新定位</button><button data-remove="${b.id}">移出</button></div></div></article>`,
         )
         .join("")
     : `<div class="empty"><div>◫</div><h2>下一段故事，从这里开始</h2><p>导入本地 TXT，每本书都会记住你读到的位置。</p><button id="empty-import" class="primary">＋ 导入第一本书</button></div>`;
@@ -184,12 +184,11 @@ async function importBooks() {
   });
 }
 function renderShelf() {
-  root.innerHTML = `<aside><a class="brand">◫ <strong>隐阅</strong><small>FISHBABY</small></a><div class="nav selected">▤ <span>我的书架</span></div><div class="side-bottom"><span class="dot"></span> 本地阅读，随时继续<p>⌘ ⇧ H　暂停 / 继续<br>⌘ ⇧ O　打开书架</p></div></aside><main><header><div><span class="eyebrow">A LITTLE TIME, A LITTLE STORY</span><h1>给自己，留一点阅读时间。</h1><p id="count"></p></div><button id="import" class="primary">＋ 导入 TXT</button></header><div class="toolbar"><h2>我的书架</h2><span>最近阅读优先</span><button id="adjust">调整阅读区</button><button id="pause">暂停</button><button id="hover">开启悬停阅读</button></div><p id="notice" role="status" hidden></p><section id="books"></section><section class="settings"><div><h2>按你的习惯阅读</h2><p>选择一本书后，调整阅读区。移开鼠标，文字便会隐去。</p></div><div class="fields"><label>阅读主题 <select id="theme"><option value="light" ${data.settings.theme === "light" ? "selected" : ""}>浅色</option><option value="dark" ${data.settings.theme === "dark" ? "selected" : ""}>深色</option></select></label><label>字号 <input id="fontSize" type="range" min="12" max="40" value="${data.settings.fontSize}"></label><label>行距 <input id="lineHeight" type="range" min="1.2" max="2.5" step="0.1" value="${data.settings.lineHeight}"></label><label>文字颜色 <input id="color" type="color" value="${data.settings.color}"></label><label>底色浓度 <input id="background" type="range" min="0" max="1" step="0.05" value="${data.settings.background}"></label><label>宽度 <input id="width" type="number" min="220" max="1400" value="${data.settings.width}"></label><label>高度 <input id="height" type="number" min="90" max="800" value="${data.settings.height}"></label><label class="check"><input id="singleLine" type="checkbox" ${data.settings.singleLine ? "checked" : ""}> 单行阅读</label><button id="reset">阅读区居中</button></div></section><footer>只属于你的一小块阅读空间。<span>TXT · UTF-8 · 本地保存</span></footer></main>`;
+  root.innerHTML = `<aside><a class="brand">◫ <strong>隐阅</strong><small>FISHBABY</small></a><div class="nav selected">▤ <span>我的书架</span></div><div class="side-bottom"><span class="dot"></span> 本地阅读，随时继续<p>⌘ ⇧ H　暂停 / 继续<br>⌘ ⇧ O　打开书架</p></div></aside><main><header><div><span class="eyebrow">A LITTLE TIME, A LITTLE STORY</span><h1>给自己，留一点阅读时间。</h1><p id="count"></p></div><button id="import" class="primary">＋ 导入 TXT</button></header><div class="toolbar"><h2>我的书架</h2><span>最近阅读优先</span><button id="adjust">调整阅读区</button><button id="pause">暂停</button></div><p id="notice" role="status" hidden></p><section id="books"></section><section class="settings"><div><h2>按你的习惯阅读</h2><p>选择一本书后，调整阅读区。移开鼠标，文字便会隐去。</p></div><div class="fields"><label>阅读主题 <select id="theme"><option value="light" ${data.settings.theme === "light" ? "selected" : ""}>浅色</option><option value="dark" ${data.settings.theme === "dark" ? "selected" : ""}>深色</option></select></label><label>字号 <input id="fontSize" type="range" min="12" max="40" value="${data.settings.fontSize}"></label><label>行距 <input id="lineHeight" type="range" min="1.2" max="2.5" step="0.1" value="${data.settings.lineHeight}"></label><label>文字颜色 <input id="color" type="color" value="${data.settings.color}"></label><label>底色浓度 <input id="background" type="range" min="0" max="1" step="0.05" value="${data.settings.background}"></label><label>宽度 <input id="width" type="number" min="220" max="1400" value="${data.settings.width}"></label><label>高度 <input id="height" type="number" min="90" max="800" value="${data.settings.height}"></label><label class="check"><input id="singleLine" type="checkbox" ${data.settings.singleLine ? "checked" : ""}> 单行阅读</label><button id="reset">阅读区居中</button></div></section><footer>只属于你的一小块阅读空间。<span>TXT · UTF-8 · 本地保存</span></footer></main>`;
   document.querySelector("#import")!.addEventListener("click", importBooks);
   for (const [id, mode] of [
     ["adjust", "setup"],
     ["pause", "paused"],
-    ["hover", "hover"],
   ])
     document.querySelector(`#${id}`)!.addEventListener("click", () =>
       action(async () => {
@@ -237,6 +236,7 @@ function renderShelf() {
   );
   renderBooks();
 }
+let readerState = "hidden";
 let text = "",
   book: Book | null = null,
   end = 0,
@@ -314,7 +314,7 @@ function renderReader() {
   document.documentElement.classList.add("reader-root");
   document.body.classList.add("reader");
   root.innerHTML =
-    '<section id="overlay" class="hidden"><div class="drag"><span id="position"></span><button id="theme-toggle" aria-label="切换主题">深色</button><button id="start">开启悬停</button></div><div id="text"></div><p id="notice" hidden></p></section>';
+    '<section id="overlay" class="hidden"><div class="drag"><span id="position"></span><button id="theme-toggle" aria-label="切换主题">深色</button><button id="start">开始阅读</button><button id="back">返回书架</button></div><div id="text"></div><p id="notice" hidden></p></section>';
   document.querySelector("#theme-toggle")!.addEventListener("click", () =>
     action(async () => {
       const latest = await invoke<Library>("library");
@@ -330,9 +330,16 @@ function renderReader() {
     }),
   );
   document
+    .querySelector("#back")!
+    .addEventListener("click", () => action(() => invoke("return_to_shelf")));
+  document
     .querySelector("#start")!
     .addEventListener("click", () =>
-      action(() => invoke("set_mode", { mode: "hover" })),
+      action(() =>
+        invoke("set_mode", {
+          mode: readerState === "reading" ? "ready" : "hover",
+        }),
+      ),
     );
   document.querySelector(".drag")!.addEventListener("mousedown", (e) => {
     if ((e.target as HTMLElement).closest("button")) return;
@@ -362,6 +369,9 @@ async function boot() {
     await listen<string>("reader-state", (e) => {
       const el = document.querySelector("#overlay")!;
       el.className = e.payload;
+      readerState = e.payload;
+      document.querySelector("#start")!.textContent =
+        e.payload === "reading" ? "暂停阅读" : "开始阅读";
       paginate();
     });
     await listen("book-changed", loadCurrent);
