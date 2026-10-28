@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Reader UI test fixture</title>
+    <style>
+      html.reader-root body.reader #app {
+        width: 420px;
+        height: 260px;
+      }
+      .reader #overlay {
+        border: 1px solid #ddd;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module">
+      import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
+      import { emit } from "@tauri-apps/api/event";
+      window.isTauri = true;
+      mockWindows("reader");
+      const text = Array.from(
+        { length: 500 },
+        (_, i) =>
+          `第${i + 1}段。\n清晨的风穿过窗户，书页停在昨天读过的地方。😀\n`,
+      ).join("");
+      const book = {
+        id: "fixture",
+        title: "阅读测试",
+        path: "fixture.txt",
+        offset: 0,
+        length: text.length,
+        lastRead: 0,
+        available: true,
+      };
+      const data = {
+        books: [book],
+        activeId: book.id,
+        settings: {
+          theme: "light",
+          fontSize: 18,
+          lineHeight: 1.8,
+          color: "#26332e",
+          background: 1,
+          singleLine: false,
+          width: 420,
+          height: 260,
+          x: null,
+          y: null,
+        },
+      };
+      mockIPC(
+        async (cmd, args) => {
+          if (cmd === "library") return structuredClone(data);
+          if (cmd === "current_text") return [structuredClone(book), text];
+          if (cmd === "save_progress") {
+            book.offset = args.offset;
+            document.title = `saved:${book.offset}`;
+            return;
+          }
+          if (cmd === "save_settings") {
+            data.settings = args.settings;
+            await emit("library-changed", null);
+            return;
+          }
+          if (cmd === "start_reading") {
+            await emit("reader-state", "reading");
+            return;
+          }
+          if (cmd === "set_mode") {
+            await emit("reader-state", args.mode);
+            return;
+          }
+        },
+        { shouldMockEvents: true },
+      );
+      await import("/src/main.ts");
+      await new Promise((r) => setTimeout(r, 100));
+      await emit("reader-state", "ready");
+    </script>
+  </body>
+</html>

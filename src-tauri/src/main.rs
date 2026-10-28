@@ -108,7 +108,7 @@ fn text_at(path: &str) -> Result<String, String> {
     if !p.extension().is_some_and(|x| x.eq_ignore_ascii_case("txt")) {
         return Err("请选择 TXT 文件".into());
     }
-    let raw = fs::read(p).map_err(|_| "文件不可用，请在书架中重新定位".to_string())?;
+    let raw = fs::read(p).map_err(|_| "文件不可用，请移出后重新导入".to_string())?;
     if raw.len() > 50 * 1024 * 1024 {
         return Err("首版支持 50 MB 以内的 TXT".into());
     }
@@ -237,46 +237,14 @@ fn save_progress(
     Ok(())
 }
 #[tauri::command]
-fn edit_book(
-    app: tauri::AppHandle,
-    id: String,
-    title: Option<String>,
-    path: Option<String>,
-    remove: bool,
-) -> Result<(), String> {
+fn remove_book(app: tauri::AppHandle, id: String) -> Result<(), String> {
     let store = app.state::<Store>();
     let mut data = store.library.lock().unwrap();
-    if remove {
-        data.books.retain(|b| b.id != id);
-        if data.active_id.as_ref() == Some(&id) {
-            data.active_id = None;
-            *store.mode.lock().unwrap() = ReaderSession::new("paused");
-            let _ = app.emit("book-changed", "");
-        }
-    } else {
-        let canonical = if let Some(p) = path {
-            let p = fs::canonicalize(p)
-                .map_err(|e| e.to_string())?
-                .to_string_lossy()
-                .into_owned();
-            text_at(&p)?;
-            if data.books.iter().any(|b| b.id != id && b.path == p) {
-                return Err("这个文件已在书架中".into());
-            }
-            Some(p)
-        } else {
-            None
-        };
-        if let Some(b) = data.books.iter_mut().find(|b| b.id == id) {
-            if let Some(t) = title {
-                if !t.trim().is_empty() {
-                    b.title = t.trim().into();
-                }
-            }
-            if let Some(p) = canonical {
-                b.path = p;
-            }
-        }
+    data.books.retain(|b| b.id != id);
+    if data.active_id.as_ref() == Some(&id) {
+        data.active_id = None;
+        *store.mode.lock().unwrap() = ReaderSession::new("paused");
+        let _ = app.emit("book-changed", "");
     }
     persist(&store, &data)?;
     drop(data);
@@ -450,7 +418,7 @@ fn main() {
             read_book,
             current_text,
             save_progress,
-            edit_book,
+            remove_book,
             save_settings,
             set_mode,
             start_reading,
