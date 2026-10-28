@@ -81,6 +81,10 @@ async function refresh() {
     styleReader();
   } else {
     renderBooks();
+    for (const id of ["width", "height"] as const)
+      (document.getElementById(id) as HTMLInputElement).value = String(
+        data.settings[id],
+      );
     const theme = document.querySelector<HTMLSelectElement>("#theme");
     if (theme) theme.value = data.settings.theme;
     (document.querySelector("#color") as HTMLInputElement).value =
@@ -205,7 +209,7 @@ function renderShelf() {
   document
     .querySelector("#reset")!
     .addEventListener("click", () => action(() => invoke("reset_position")));
-  document.querySelector(".fields")!.addEventListener("change", () =>
+  document.querySelector(".fields")!.addEventListener("change", (event) =>
     action(async () => {
       const settings = { ...data.settings };
       for (const id of [
@@ -231,7 +235,10 @@ function renderShelf() {
         settings.color = themes[theme].color;
         settings.background = Math.max(0.85, settings.background);
       }
-      await invoke("save_settings", { settings });
+      await invoke("save_settings", {
+        settings,
+        resize: ["width", "height"].includes((event.target as HTMLElement).id),
+      });
     }),
   );
   renderBooks();
@@ -320,6 +327,7 @@ function renderReader() {
       const latest = await invoke<Library>("library");
       const theme: Theme = latest.settings.theme === "light" ? "dark" : "light";
       await invoke("save_settings", {
+        resize: false,
         settings: {
           ...latest.settings,
           theme,

@@ -283,13 +283,37 @@ fn edit_book(
     changed(&app);
     Ok(())
 }
+// Style changes preserve live window dimensions; only size inputs request resize.
+fn preserve_reader_size(settings: &mut Settings, resize: bool, live: Option<(f64, f64)>) {
+    if resize {
+        settings.width = settings.width.clamp(220., 1400.);
+        settings.height = settings.height.clamp(90., 800.);
+    } else if let Some((width, height)) = live {
+        settings.width = width;
+        settings.height = height;
+    }
+}
+fn reader_mounted(mode: &str, state: &str) -> bool {
+    mode == "hover" || state != "hidden"
+}
+
 #[tauri::command]
-fn save_settings(app: tauri::AppHandle, mut settings: Settings) -> Result<(), String> {
+fn save_settings(
+    app: tauri::AppHandle,
+    mut settings: Settings,
+    resize: Option<bool>,
+) -> Result<(), String> {
     settings.font_size = settings.font_size.clamp(12., 40.);
     settings.line_height = settings.line_height.clamp(1.2, 2.5);
     settings.background = settings.background.clamp(0., 1.);
-    settings.width = settings.width.clamp(220., 1400.);
-    settings.height = settings.height.clamp(90., 800.);
+    let resize = resize.unwrap_or(false);
+    let reader = app.get_webview_window("reader");
+    let live_size = reader.as_ref().and_then(|w| {
+        let size = w.inner_size().ok()?;
+        let scale = w.scale_factor().ok()?;
+        Some((size.width as f64 / scale, size.height as f64 / scale))
+    });
+    preserve_reader_size(&mut settings, resize, live_size);
     let store = app.state::<Store>();
     let mut data = store.library.lock().unwrap();
     settings.x = data.settings.x;
@@ -297,9 +321,11 @@ fn save_settings(app: tauri::AppHandle, mut settings: Settings) -> Result<(), St
     data.settings = settings.clone();
     persist(&store, &data)?;
     drop(data);
-    if let Some(w) = app.get_webview_window("reader") {
-        w.set_size(tauri::LogicalSize::new(settings.width, settings.height))
-            .map_err(|e| e.to_string())?;
+    if resize {
+        if let Some(w) = reader {
+            w.set_size(tauri::LogicalSize::new(settings.width, settings.height))
+                .map_err(|e| e.to_string())?;
+        }
     }
     changed(&app);
     Ok(())
@@ -522,7 +548,7 @@ fn main() {
                 })?;
             let handle = app.handle().clone();
             std::thread::spawn(move || {
-                let mut previous = String::new();
+                let mut previous = (String::new(), false);
                 loop {
                     std::thread::sleep(Duration::from_millis(30));
                     let store = handle.state::<Store>();
@@ -549,17 +575,25 @@ fn main() {
                     } else {
                         false
                     };
-                    let state = store.mode.lock().unwrap().update(inside, Instant::now());
-                    if previous != state {
+                    let (state, mounted) = {
+                        let mut session = store.mode.lock().unwrap();
+                        let state = session.update(inside, Instant::now());
+                        (state, reader_mounted(&session.name, state))
+                    };
+                    if previous != (state.into(), mounted) {
                         let _ = w.set_focusable(state == "setup" || state == "ready");
                         let _ = w.set_ignore_cursor_events(state == "hidden");
-                        if state == "hidden" {
-                            let _ = w.hide();
+                        // Hover hiding changes WebView visibility and hit testing only.
+                        // Hiding the active NSWindow can restore the minimized main window.
+                        if mounted {
+                            if !w.is_visible().unwrap_or(false) {
+                                let _ = w.show();
+                            }
                         } else {
-                            let _ = w.show();
+                            let _ = w.hide();
                         }
                         let _ = w.emit("reader-state", state);
-                        previous = state.into();
+                        previous = (state.into(), mounted);
                     }
                 }
             });
@@ -573,13 +607,25 @@ fn main() {
                 }
             }
             if w.label() == "reader" {
-                if let tauri::WindowEvent::Moved(p) = event {
-                    let store = w.state::<Store>();
-                    let mut data = store.library.lock().unwrap();
+                if let Some(store) = w.try_state::<Store>() {
                     let scale = w.scale_factor().unwrap_or(1.);
-                    data.settings.x = Some(p.x as f64 / scale);
-                    data.settings.y = Some(p.y as f64 / scale);
-                    let _ = persist(&store, &data);
+                    match event {
+                        tauri::WindowEvent::Moved(p) => {
+                            let mut data = store.library.lock().unwrap();
+                            data.settings.x = Some(p.x as f64 / scale);
+                            data.settings.y = Some(p.y as f64 / scale);
+                            let _ = persist(&store, &data);
+                        }
+                        tauri::WindowEvent::Resized(size) if size.width > 0 && size.height > 0 => {
+                            let mut data = store.library.lock().unwrap();
+                            data.settings.width = size.width as f64 / scale;
+                            data.settings.height = size.height as f64 / scale;
+                            let _ = persist(&store, &data);
+                            drop(data);
+                            changed(w.app_handle());
+                        }
+                        _ => {}
+                    }
                 }
             }
         })
@@ -701,6 +747,43 @@ mod tests {
             session.update(true, now + Duration::from_millis(150)),
             "reading"
         );
+    }
+    #[test]
+    fn theme_change_keeps_manual_size_and_explicit_resize_still_applies() {
+        let mut settings = Settings::default();
+        settings.theme = Theme::Dark;
+        preserve_reader_size(&mut settings, false, Some((736., 284.)));
+        assert_eq!((settings.width, settings.height), (736., 284.));
+        settings.theme = Theme::Light;
+        preserve_reader_size(&mut settings, false, Some((736., 284.)));
+        let saved: Settings =
+            serde_json::from_slice(&serde_json::to_vec(&settings).unwrap()).unwrap();
+        assert_eq!((saved.width, saved.height), (736., 284.));
+        settings.width = 600.;
+        settings.height = 210.;
+        preserve_reader_size(&mut settings, true, Some((736., 284.)));
+        assert_eq!((settings.width, settings.height), (600., 210.));
+    }
+    #[test]
+    fn first_pointer_exit_keeps_native_reader_mounted_and_session_in_hover() {
+        let mut session = ReaderSession::new("hover");
+        session.pointer_inside = Some(true);
+        let now = Instant::now();
+        let visible = session.update(false, now);
+        assert_eq!(visible, "reading");
+        assert!(reader_mounted(&session.name, visible));
+        session.pointer_inside = Some(false);
+        let hidden = session.update(false, now);
+        assert_eq!(hidden, "hidden");
+        assert!(reader_mounted(&session.name, hidden));
+        assert!(!session.reopen_shelf_on_activation());
+        assert_eq!(session.name, "hover");
+        assert_eq!(session.update(true, now), "hidden");
+        assert_eq!(
+            session.update(true, now + Duration::from_millis(150)),
+            "reading"
+        );
+        assert!(!reader_mounted("paused", "hidden"));
     }
     #[test]
     fn older_settings_default_to_light_and_themes_roundtrip() {
