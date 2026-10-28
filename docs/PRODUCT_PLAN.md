@@ -1,7 +1,7 @@
 # 悬浮文字阅读器：第一版产品方案
 
 状态：开发基线（2026-10-28）  
-目标平台：macOS  
+目标平台：macOS；Windows 提供独立分支与 GitHub Actions 构建配置，待 Windows 环境验证
 暂定名称：隐阅
 
 ## 1. 产品目标
@@ -122,3 +122,5 @@ EPUB/PDF、云同步、封面抓取、标签与书架分组、全文搜索、账
 书架界面改版：只保留阅读与移出操作，取消改名和重新定位；书架与阅读设置分开，移除装饰符号与宣传文案。阅读区新增整本书进度滚动条，支持点击、拖动和键盘定位；滚轮翻页和原文进度锚点保持一致。视觉参考：[Koodo Reader](https://github.com/koodo-reader/koodo-reader) 的资料库布局与 [Readwise Reader](https://readwise.io/read) 的阅读界面，采用独立实现的纯色书封、系统字体和分组设置。
 
 本轮验证：书架及阅读设置页已完成原生窗口截图审阅；独立测试页验证滚动条拖动定位、键盘末页跳转和阅读位置保存。自动检查包含 Unicode 边界、首末页映射、短文滚动条，以及既有悬停与主题尺寸回归。
+
+分发与分支：`main` 保留公共基线，`mac` 和 `windows` 分别用于平台开发与打包。macOS 生成 arm64 Release `.app` 与 `.dmg`，使用 ad-hoc 签名；Windows 提供手动 GitHub Actions 构建 NSIS x64 安装包及 SHA-256 校验文件，本轮不触发 Windows 构建。安装包不进入 Git 历史。

@@ -10,7 +10,6 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "macOSPrivateApi": true,
     "windows": [
       {
         "label": "main",
@@ -39,11 +38,12 @@
     ],
     "security": {
       "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src ipc: http://ipc.localhost"
-    }
+    },
+    "macOSPrivateApi": true
   },
   "bundle": {
     "active": true,
-    "targets": ["app", "dmg"],
-    "macOS": { "minimumSystemVersion": "11.0" }
+    "targets": "all",
+    "icon": ["icons/icon.png"]
   }
 }

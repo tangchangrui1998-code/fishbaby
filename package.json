@@ -6,9 +6,11 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc --noEmit && vite build",
-    "test": "node --import tsx --test src/*.test.ts",
+    "test": "node --import tsx --test src/reader.test.ts src/scrollbar.test.ts",
     "tauri": "tauri",
-    "desktop": "tauri dev"
+    "desktop": "tauri dev",
+    "package:mac": "tauri build --bundles app,dmg",
+    "package:windows": "tauri build --bundles nsis"
   },
   "dependencies": {
     "@tauri-apps/api": "2.11.0",

@@ -524,12 +524,15 @@ fn main() {
                         break;
                     };
                     let window_scale = w.scale_factor().unwrap_or(1.);
+                    #[cfg(target_os = "macos")]
                     let cursor_scale = handle
                         .primary_monitor()
                         .ok()
                         .flatten()
                         .map(|m| m.scale_factor())
                         .unwrap_or(window_scale);
+                    #[cfg(not(target_os = "macos"))]
+                    let cursor_scale = window_scale;
                     let inside = if let (Ok(p), Ok(o), Ok(s)) =
                         (handle.cursor_position(), w.outer_position(), w.outer_size())
                     {
@@ -599,18 +602,19 @@ fn main() {
         })
         .build(tauri::generate_context!())
         .expect("启动隐阅失败")
-        .run(|app, event| {
-            if let tauri::RunEvent::Reopen { .. } = event {
+        .run(|_app, _event| {
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = _event {
                 // Reactivating a reader window must not act like Return to Bookshelf.
                 // Drop the session lock before window operations dispatch native events.
-                let reopen = app
+                let reopen = _app
                     .state::<Store>()
                     .mode
                     .lock()
                     .unwrap()
                     .reopen_shelf_on_activation();
                 if reopen {
-                    open_shelf(app);
+                    open_shelf(_app);
                 }
             }
         });

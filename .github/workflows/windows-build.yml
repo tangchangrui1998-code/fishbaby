@@ -1,0 +1,58 @@
+name: Build Windows installer
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    if: github.ref == 'refs/heads/windows'
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Set up Rust
+        run: |
+          rustup toolchain install 1.88.0 --profile minimal
+          rustup default 1.88.0
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: windows-x64-rust-1.88-${{ hashFiles('src-tauri/Cargo.lock') }}
+      - run: npm ci
+      - name: Check and test
+        run: |
+          npm test
+          cargo test --manifest-path src-tauri/Cargo.toml --locked
+      - name: Build NSIS installer
+        run: npm run package:windows -- --ci
+      - name: Installer checksum
+        shell: pwsh
+        run: |
+          $installers = Get-ChildItem 'src-tauri/target/release/bundle/nsis/*-setup.exe'
+          if (!$installers) { throw 'Windows installer was not generated' }
+          $installers | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+            "$hash  $($_.Name)"
+          } | Set-Content 'src-tauri/target/release/bundle/nsis/SHA256SUMS.txt'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fishbaby-windows-x64
+          path: |
+            src-tauri/target/release/bundle/nsis/*-setup.exe
+            src-tauri/target/release/bundle/nsis/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
