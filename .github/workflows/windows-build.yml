@@ -48,7 +48,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: windows-startup-diagnostics
-          path: ${{ runner.temp }}/fishbaby-startup.log
+          path: ${{ runner.temp }}/fishbaby-diagnostics/
           if-no-files-found: ignore
       - name: Installer checksum
         shell: pwsh
