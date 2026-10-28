@@ -13,7 +13,13 @@ interface Book {
   lastRead: number;
   available: boolean;
 }
+type Theme = "light" | "dark";
+const themes = {
+  light: { surface: "247,247,240", color: "#26332e", chrome: "#55715f" },
+  dark: { surface: "28,33,32", color: "#e1e7df", chrome: "#afc2b5" },
+};
 interface Settings {
+  theme: Theme;
   fontSize: number;
   lineHeight: number;
   color: string;
@@ -35,10 +41,11 @@ let data: Library = {
   books: [],
   activeId: null,
   settings: {
+    theme: "light",
     fontSize: 18,
     lineHeight: 1.8,
     color: "#26332e",
-    background: 0,
+    background: 0.92,
     singleLine: false,
     width: 420,
     height: 160,
@@ -74,6 +81,13 @@ async function refresh() {
     styleReader();
   } else {
     renderBooks();
+    const theme = document.querySelector<HTMLSelectElement>("#theme");
+    if (theme) theme.value = data.settings.theme;
+    (document.querySelector("#color") as HTMLInputElement).value =
+      data.settings.color;
+    (document.querySelector("#background") as HTMLInputElement).value = String(
+      data.settings.background,
+    );
   }
 }
 function percent(b: Book) {
@@ -101,7 +115,6 @@ function renderBooks() {
           });
           if (result[2])
             toast("文件内容发生变化，已尝试恢复原文位置，请确认。");
-          await invoke("set_mode", { mode: "setup" });
         })),
   );
   list.querySelectorAll<HTMLButtonElement>("[data-remove]").forEach(
@@ -171,7 +184,7 @@ async function importBooks() {
   });
 }
 function renderShelf() {
-  root.innerHTML = `<aside><a class="brand">◫ <strong>隐阅</strong><small>FISHBABY</small></a><div class="nav selected">▤ <span>我的书架</span></div><div class="side-bottom"><span class="dot"></span> 本地阅读，随时继续<p>⌘ ⇧ H　暂停 / 继续<br>⌘ ⇧ O　打开书架</p></div></aside><main><header><div><span class="eyebrow">A LITTLE TIME, A LITTLE STORY</span><h1>给自己，留一点阅读时间。</h1><p id="count"></p></div><button id="import" class="primary">＋ 导入 TXT</button></header><div class="toolbar"><h2>我的书架</h2><span>最近阅读优先</span><button id="adjust">调整阅读区</button><button id="pause">暂停</button><button id="hover">开启悬停阅读</button></div><p id="notice" role="status" hidden></p><section id="books"></section><section class="settings"><div><h2>按你的习惯阅读</h2><p>选择一本书后，调整阅读区。移开鼠标，文字便会隐去。</p></div><div class="fields"><label>字号 <input id="fontSize" type="range" min="12" max="40" value="${data.settings.fontSize}"></label><label>行距 <input id="lineHeight" type="range" min="1.2" max="2.5" step="0.1" value="${data.settings.lineHeight}"></label><label>文字颜色 <input id="color" type="color" value="${data.settings.color}"></label><label>底色浓度 <input id="background" type="range" min="0" max="1" step="0.05" value="${data.settings.background}"></label><label>宽度 <input id="width" type="number" min="220" max="1400" value="${data.settings.width}"></label><label>高度 <input id="height" type="number" min="90" max="800" value="${data.settings.height}"></label><label class="check"><input id="singleLine" type="checkbox" ${data.settings.singleLine ? "checked" : ""}> 单行阅读</label><button id="reset">阅读区居中</button></div></section><footer>只属于你的一小块阅读空间。<span>TXT · UTF-8 · 本地保存</span></footer></main>`;
+  root.innerHTML = `<aside><a class="brand">◫ <strong>隐阅</strong><small>FISHBABY</small></a><div class="nav selected">▤ <span>我的书架</span></div><div class="side-bottom"><span class="dot"></span> 本地阅读，随时继续<p>⌘ ⇧ H　暂停 / 继续<br>⌘ ⇧ O　打开书架</p></div></aside><main><header><div><span class="eyebrow">A LITTLE TIME, A LITTLE STORY</span><h1>给自己，留一点阅读时间。</h1><p id="count"></p></div><button id="import" class="primary">＋ 导入 TXT</button></header><div class="toolbar"><h2>我的书架</h2><span>最近阅读优先</span><button id="adjust">调整阅读区</button><button id="pause">暂停</button><button id="hover">开启悬停阅读</button></div><p id="notice" role="status" hidden></p><section id="books"></section><section class="settings"><div><h2>按你的习惯阅读</h2><p>选择一本书后，调整阅读区。移开鼠标，文字便会隐去。</p></div><div class="fields"><label>阅读主题 <select id="theme"><option value="light" ${data.settings.theme === "light" ? "selected" : ""}>浅色</option><option value="dark" ${data.settings.theme === "dark" ? "selected" : ""}>深色</option></select></label><label>字号 <input id="fontSize" type="range" min="12" max="40" value="${data.settings.fontSize}"></label><label>行距 <input id="lineHeight" type="range" min="1.2" max="2.5" step="0.1" value="${data.settings.lineHeight}"></label><label>文字颜色 <input id="color" type="color" value="${data.settings.color}"></label><label>底色浓度 <input id="background" type="range" min="0" max="1" step="0.05" value="${data.settings.background}"></label><label>宽度 <input id="width" type="number" min="220" max="1400" value="${data.settings.width}"></label><label>高度 <input id="height" type="number" min="90" max="800" value="${data.settings.height}"></label><label class="check"><input id="singleLine" type="checkbox" ${data.settings.singleLine ? "checked" : ""}> 单行阅读</label><button id="reset">阅读区居中</button></div></section><footer>只属于你的一小块阅读空间。<span>TXT · UTF-8 · 本地保存</span></footer></main>`;
   document.querySelector("#import")!.addEventListener("click", importBooks);
   for (const [id, mode] of [
     ["adjust", "setup"],
@@ -212,6 +225,13 @@ function renderShelf() {
       settings.singleLine = (
         document.getElementById("singleLine") as HTMLInputElement
       ).checked;
+      const theme = (document.getElementById("theme") as HTMLSelectElement)
+        .value as Theme;
+      if (theme !== settings.theme) {
+        settings.theme = theme;
+        settings.color = themes[theme].color;
+        settings.background = Math.max(0.85, settings.background);
+      }
       await invoke("save_settings", { settings });
     }),
   );
@@ -228,8 +248,17 @@ function styleReader() {
   el.style.fontSize = `${s.fontSize}px`;
   el.style.lineHeight = String(s.lineHeight);
   el.style.color = s.color;
-  document.querySelector<HTMLElement>("#overlay")!.style.background =
-    `rgba(247,247,240,${s.background})`;
+  const palette = themes[s.theme];
+  const overlay = document.querySelector<HTMLElement>("#overlay")!;
+  overlay.style.setProperty("--reader-surface", palette.surface);
+  overlay.style.setProperty("--reader-chrome", palette.chrome);
+  overlay.style.color = palette.chrome;
+  overlay.style.background = `rgba(${palette.surface},${s.background})`;
+  const toggle = document.querySelector<HTMLButtonElement>("#theme-toggle");
+  if (toggle) {
+    toggle.textContent = s.theme === "light" ? "深色" : "浅色";
+    toggle.setAttribute("aria-label", `切换到${toggle.textContent}主题`);
+  }
   el.classList.toggle("single", s.singleLine);
   paginate();
 }
@@ -282,9 +311,24 @@ async function turn(direction: number) {
   });
 }
 function renderReader() {
+  document.documentElement.classList.add("reader-root");
   document.body.classList.add("reader");
   root.innerHTML =
-    '<section id="overlay" class="hidden"><div class="drag"><span id="position"></span><button id="start">开启悬停</button></div><div id="text"></div><p id="notice" hidden></p></section>';
+    '<section id="overlay" class="hidden"><div class="drag"><span id="position"></span><button id="theme-toggle" aria-label="切换主题">深色</button><button id="start">开启悬停</button></div><div id="text"></div><p id="notice" hidden></p></section>';
+  document.querySelector("#theme-toggle")!.addEventListener("click", () =>
+    action(async () => {
+      const latest = await invoke<Library>("library");
+      const theme: Theme = latest.settings.theme === "light" ? "dark" : "light";
+      await invoke("save_settings", {
+        settings: {
+          ...latest.settings,
+          theme,
+          color: themes[theme].color,
+          background: Math.max(0.85, latest.settings.background),
+        },
+      });
+    }),
+  );
   document
     .querySelector("#start")!
     .addEventListener("click", () =>

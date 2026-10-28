@@ -11,7 +11,8 @@ body {
   margin: 0;
 }
 button,
-input {
+input,
+select {
   font: inherit;
 }
 button {
@@ -361,14 +362,14 @@ footer {
   visibility: hidden;
 }
 .reader .drag {
-  display: none;
+  display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 6px;
   height: 26px;
   cursor: move;
   font-size: 10px;
-  color: #55715f;
+  color: var(--reader-chrome);
   user-select: none;
 }
 .reader .drag span {
@@ -384,7 +385,7 @@ footer {
 .reader #overlay.setup {
   border: 1px dashed #719676;
   border-radius: 6px;
-  background: #f7f7f0e8 !important;
+  background: rgba(var(--reader-surface), 0.96) !important;
 }
 .reader .setup .drag {
   display: flex;
@@ -395,6 +396,9 @@ footer {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   font-family: "Songti SC", serif;
+}
+.reader #text {
+  height: calc(100% - 26px);
 }
 .reader .setup #text {
   height: calc(100% - 26px);
@@ -407,4 +411,28 @@ footer {
   position: absolute;
   inset: 25px 5px auto;
   font-size: 10px;
+}
+
+.reader #start {
+  display: none;
+}
+.reader .setup #start {
+  display: inline-block;
+}
+.reader .drag span {
+  flex: 1;
+}
+.fields select {
+  color: inherit;
+  background: #fcfcf7;
+  border: 1px solid #d5ddce;
+  border-radius: 5px;
+  padding: 5px;
+}
+.reader .drag button:hover {
+  background: rgba(var(--reader-surface), 0.9);
+}
+
+.reader-root {
+  background: transparent;
 }

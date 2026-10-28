@@ -25,9 +25,18 @@ struct Book {
     #[serde(default)]
     available: bool,
 }
+#[derive(Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum Theme {
+    #[default]
+    Light,
+    Dark,
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 struct Settings {
+    theme: Theme,
     font_size: f64,
     line_height: f64,
     color: String,
@@ -41,10 +50,11 @@ struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            theme: Theme::Light,
             font_size: 18.,
             line_height: 1.8,
             color: "#26332e".into(),
-            background: 0.,
+            background: 0.92,
             single_line: false,
             width: 420.,
             height: 160.,
@@ -190,6 +200,8 @@ fn read_book(app: tauri::AppHandle, id: String) -> Result<(Book, String, bool), 
     drop(data);
     changed(&app);
     let _ = app.emit("book-changed", &book.id);
+    // Reading always enters hover mode; setup is an explicit adjustment action.
+    set_mode(app.clone(), "hover".into())?;
     Ok((book, text, modified))
 }
 #[tauri::command]
@@ -301,6 +313,11 @@ fn set_mode(app: tauri::AppHandle, mode: String) -> Result<(), String> {
     if mode != "paused" && store.library.lock().unwrap().active_id.is_none() {
         return Err("请先选择一本书".into());
     }
+    if mode == "hover" {
+        if let Some(shelf) = app.get_webview_window("main") {
+            shelf.hide().map_err(|e| e.to_string())?;
+        }
+    }
     *store.mode.lock().unwrap() = mode;
     Ok(())
 }
@@ -316,6 +333,17 @@ fn open_shelf(app: &tauri::AppHandle) {
         let _ = w.set_focus();
     }
 }
+// Keeping this decision separate prevents adjustment mode from leaking into reading.
+fn reader_state(mode: &str, inside: bool, dwell: Option<Duration>) -> &'static str {
+    if mode == "setup" {
+        "setup"
+    } else if mode == "hover" && inside && dwell.is_some_and(|t| t >= Duration::from_millis(150)) {
+        "reading"
+    } else {
+        "hidden"
+    }
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -445,15 +473,7 @@ fn main() {
                     } else {
                         entered = None;
                     }
-                    let state = if mode == "setup" {
-                        "setup"
-                    } else if mode == "hover"
-                        && entered.is_some_and(|t| t.elapsed() >= Duration::from_millis(150))
-                    {
-                        "reading"
-                    } else {
-                        "hidden"
-                    };
+                    let state = reader_state(&mode, inside, entered.map(|t| t.elapsed()));
                     if previous != state {
                         let _ = w.set_focusable(state == "setup");
                         let _ = w.set_ignore_cursor_events(state == "hidden");
@@ -499,6 +519,37 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn hover_hides_immediately_on_exit_and_can_be_reentered() {
+        for _ in 0..30 {
+            assert_eq!(
+                reader_state("hover", true, Some(Duration::from_millis(120))),
+                "hidden"
+            );
+            assert_eq!(
+                reader_state("hover", true, Some(Duration::from_millis(150))),
+                "reading"
+            );
+            assert_eq!(
+                reader_state("hover", false, Some(Duration::from_secs(3))),
+                "hidden"
+            );
+        }
+        assert_eq!(
+            reader_state("paused", true, Some(Duration::from_secs(3))),
+            "hidden"
+        );
+        assert_eq!(reader_state("setup", false, None), "setup");
+    }
+    #[test]
+    fn older_settings_default_to_light_and_themes_roundtrip() {
+        let mut settings: Settings = serde_json::from_str(r##"{"fontSize":20}"##).unwrap();
+        assert!(matches!(settings.theme, Theme::Light));
+        settings.theme = Theme::Dark;
+        let restored: Settings =
+            serde_json::from_slice(&serde_json::to_vec(&settings).unwrap()).unwrap();
+        assert!(matches!(restored.theme, Theme::Dark));
+    }
     #[test]
     fn txt_import_normalizes_bom_and_newlines_and_rejects_invalid_utf8() {
         let path = std::env::temp_dir().join(format!("fishbaby-{}.txt", std::process::id()));
