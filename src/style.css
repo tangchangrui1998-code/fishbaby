@@ -1,0 +1,410 @@
+:root {
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
+  color: #233a33;
+  background: #f5f5ef;
+  font-synthesis: none;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+}
+button,
+input {
+  font: inherit;
+}
+button {
+  cursor: pointer;
+  border: 1px solid #d9dfd6;
+  border-radius: 8px;
+  padding: 9px 14px;
+  background: transparent;
+  color: inherit;
+  transition: background 0.15s;
+}
+button:hover {
+  background: #e6ebe1;
+}
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid #558c6b;
+  outline-offset: 3px;
+}
+button.primary {
+  background: #2c5443;
+  color: #fff;
+  border-color: #2c5443;
+}
+button.primary:hover {
+  background: #416b57;
+}
+#app {
+  display: flex;
+  min-height: 100vh;
+}
+aside {
+  width: 196px;
+  padding: 34px 22px;
+  flex-shrink: 0;
+  border-right: 1px solid #e0e3d8;
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  background: #eef0e6;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 26px;
+  flex-wrap: wrap;
+}
+.brand small {
+  font-size: 10px;
+  letter-spacing: 3px;
+  flex-basis: 100%;
+  padding-left: 36px;
+  color: #839083;
+}
+.nav {
+  display: flex;
+  gap: 13px;
+  margin-top: 52px;
+  padding: 13px;
+  border-radius: 9px;
+  font-size: 14px;
+}
+.selected {
+  background: #dde5d6;
+}
+.side-bottom {
+  position: absolute;
+  bottom: 26px;
+  font-size: 11px;
+  color: #697b6b;
+}
+.side-bottom p {
+  line-height: 2.2;
+  margin-top: 18px;
+}
+.dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  background: #779d75;
+  border-radius: 50%;
+  margin-right: 4px;
+}
+main {
+  margin-left: 196px;
+  padding: 42px 40px 22px;
+  width: calc(100% - 196px);
+}
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding-bottom: 35px;
+  border-bottom: 1px solid #dce1d4;
+}
+.eyebrow {
+  font-size: 9px;
+  letter-spacing: 2px;
+  color: #7e8c75;
+}
+h1 {
+  font-family: "Songti SC", serif;
+  font-size: 29px;
+  font-weight: 600;
+  margin: 15px 0;
+}
+header p {
+  font-size: 12px;
+  color: #7b8878;
+  margin: 0;
+}
+header button {
+  white-space: nowrap;
+  font-size: 12px;
+}
+.toolbar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 24px 0;
+}
+h2 {
+  font-size: 16px;
+  margin: 0;
+}
+.toolbar > span {
+  font-size: 11px;
+  color: #869180;
+  flex: 1;
+}
+.toolbar button {
+  font-size: 11px;
+  padding: 7px 9px;
+}
+#books {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(205px, 1fr));
+  gap: 22px;
+  min-height: 280px;
+}
+.book {
+  background: #fffefa;
+  border: 1px solid #e2e5d9;
+  padding: 14px;
+  border-radius: 12px;
+  overflow: hidden;
+}
+.book.active {
+  border-color: #82977b;
+}
+.cover {
+  height: 180px;
+  border-radius: 5px 9px 9px 5px;
+  box-shadow: inset 5px 0 0 #00000015;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 18px 20px;
+  background: #dfe6d5;
+  color: #3e5542;
+}
+.c1 {
+  background: #e5dccb;
+  color: #766044;
+}
+.c2 {
+  background: #d6e0df;
+  color: #3b5e60;
+}
+.c3 {
+  background: #e9deda;
+  color: #795750;
+}
+.cover span {
+  font-size: 9px;
+  letter-spacing: 2px;
+  opacity: 0.7;
+}
+.cover strong {
+  font-family: "Songti SC", serif;
+  font-size: 25px;
+  font-weight: 500;
+  line-height: 1.4;
+  overflow: hidden;
+  max-height: 104px;
+  overflow-wrap: anywhere;
+}
+.cover i {
+  font-style: normal;
+  font-size: 10px;
+  letter-spacing: 4px;
+  opacity: 0.6;
+}
+.book-info h3 {
+  font-size: 14px;
+  margin: 16px 0 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.path {
+  font-size: 10px;
+  color: #8b9286;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
+.progress {
+  height: 3px;
+  background: #e9ede3;
+  border-radius: 2px;
+  margin-top: 16px;
+}
+.progress span {
+  display: block;
+  height: 100%;
+  background: #698969;
+}
+.book-info p:not(.path) {
+  font-size: 10px;
+  color: #7d8a76;
+  display: flex;
+  justify-content: space-between;
+}
+.read {
+  width: 100%;
+  font-size: 12px;
+  margin-top: 8px;
+}
+.book-actions {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+}
+.book-actions button {
+  font-size: 10px;
+  border: 0;
+  padding: 6px 4px;
+  color: #788575;
+}
+.empty {
+  grid-column: 1/-1;
+  text-align: center;
+  padding: 38px 0 45px;
+  border: 1px dashed #d2dac8;
+  border-radius: 12px;
+}
+.empty > div {
+  font-size: 44px;
+  color: #9cae8e;
+  margin-bottom: 18px;
+}
+.empty p {
+  font-size: 12px;
+  color: #84907c;
+  margin: 12px 0 24px;
+}
+.empty button {
+  font-size: 12px;
+}
+.settings {
+  border-top: 1px solid #dce1d4;
+  margin-top: 32px;
+  padding-top: 26px;
+}
+.settings p {
+  font-size: 11px;
+  color: #85917b;
+}
+.fields {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 18px;
+  margin-top: 22px;
+}
+.fields label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 11px;
+  color: #6f7d66;
+}
+.fields input[type="range"] {
+  width: 90px;
+  accent-color: #527355;
+}
+.fields input[type="number"] {
+  width: 72px;
+  border: 1px solid #d5ddce;
+  background: #fcfcf7;
+  border-radius: 5px;
+  padding: 5px;
+  color: inherit;
+}
+.fields input[type="color"] {
+  width: 35px;
+  height: 25px;
+  border: 0;
+  background: none;
+}
+.fields input[type="checkbox"] {
+  accent-color: #527355;
+}
+.fields .check {
+  justify-content: flex-start;
+}
+.fields button {
+  font-size: 11px;
+}
+footer {
+  font-size: 10px;
+  color: #94a08b;
+  margin-top: 35px;
+  display: flex;
+  justify-content: space-between;
+}
+#notice {
+  white-space: pre-wrap;
+  font-size: 12px;
+  background: #f1e5c9;
+  color: #715b2f;
+  border-radius: 7px;
+  padding: 12px;
+  line-height: 1.7;
+}
+.browser-note {
+  padding: 40px;
+}
+.reader {
+  background: transparent;
+  overflow: hidden;
+}
+.reader #app {
+  min-height: 0;
+  height: 100vh;
+  display: block;
+}
+.reader #overlay {
+  height: 100%;
+  padding: 8px 14px;
+  overflow: hidden;
+}
+.reader #overlay.hidden {
+  visibility: hidden;
+}
+.reader .drag {
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  height: 26px;
+  cursor: move;
+  font-size: 10px;
+  color: #55715f;
+  user-select: none;
+}
+.reader .drag span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.reader .drag button {
+  padding: 3px 7px;
+  font-size: 10px;
+  flex-shrink: 0;
+}
+.reader #overlay.setup {
+  border: 1px dashed #719676;
+  border-radius: 6px;
+  background: #f7f7f0e8 !important;
+}
+.reader .setup .drag {
+  display: flex;
+}
+.reader #text {
+  height: 100%;
+  overflow: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: "Songti SC", serif;
+}
+.reader .setup #text {
+  height: calc(100% - 26px);
+}
+.reader #text.single {
+  white-space: pre;
+  height: 1.8em !important;
+}
+.reader #notice {
+  position: absolute;
+  inset: 25px 5px auto;
+  font-size: 10px;
+}

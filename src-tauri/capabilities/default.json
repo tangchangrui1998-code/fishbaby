@@ -1,0 +1,9 @@
+{
+  "identifier": "default",
+  "windows": ["main", "reader"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "dialog:allow-open"
+  ]
+}
