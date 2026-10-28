@@ -38,6 +38,12 @@ jobs:
         run: |
           npm test
           cargo test --manifest-path src-tauri/Cargo.toml --locked
+      - name: Remove cached installer outputs
+        shell: pwsh
+        run: |
+          if (Test-Path 'src-tauri/target/release/bundle') {
+            Remove-Item 'src-tauri/target/release/bundle' -Recurse -Force
+          }
       - name: Build NSIS installer
         run: npm run package:windows -- --ci
       - name: Install and verify bookshelf startup

@@ -3,13 +3,18 @@ $installPath = Join-Path $env:RUNNER_TEMP 'fishbaby-installed'
 $diagnostics = Join-Path $env:RUNNER_TEMP 'fishbaby-diagnostics'
 New-Item -ItemType Directory -Force $diagnostics | Out-Null
 $logPath = Join-Path $diagnostics 'startup.log'
-$installer = Get-ChildItem 'src-tauri/target/release/bundle/nsis/*-setup.exe' | Select-Object -First 1
-if (!$installer) { throw 'Installer is missing' }
+$version = (Get-Content 'package.json' -Raw | ConvertFrom-Json).version
+$installers = @(Get-ChildItem "src-tauri/target/release/bundle/nsis/*_${version}_x64-setup.exe")
+if ($installers.Count -ne 1) { throw "Expected exactly one installer for $version, found $($installers.Count)" }
+$installer = $installers[0]
+Write-Output "Testing installer: $($installer.Name)"
 $install = Start-Process -FilePath $installer.FullName -ArgumentList @('/S', "/D=$installPath") -Wait -PassThru
 if ($install.ExitCode -ne 0) { throw "Installer failed: $($install.ExitCode)" }
 $exe = Join-Path $installPath 'fishbaby.exe'
 if (!(Test-Path $exe)) { throw "Installed executable not found: $exe" }
 Get-Item $exe | Select-Object FullName, Length, VersionInfo | Format-List | Out-String | Set-Content (Join-Path $diagnostics 'installed-file.txt')
+$installedVersion = (Get-Item $exe).VersionInfo.ProductVersion
+if ($installedVersion -ne $version) { throw "Installed version $installedVersion does not match requested $version" }
 $info = [System.Diagnostics.ProcessStartInfo]::new()
 $info.FileName = $exe
 $info.WorkingDirectory = $installPath
