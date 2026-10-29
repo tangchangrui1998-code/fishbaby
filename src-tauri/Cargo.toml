@@ -1,6 +1,6 @@
 [package]
 name = "fishbaby"
-version = "0.1.7"
+version = "0.1.8"
 edition = "2021"
 rust-version = "1.88"
 
@@ -19,3 +19,6 @@ zip = { version = "6", default-features = false, features = ["deflate"] }
 roxmltree = "0.21"
 scraper = "0.24"
 percent-encoding = "2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Dwm"] }
