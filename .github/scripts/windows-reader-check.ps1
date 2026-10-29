@@ -9,6 +9,7 @@ using System.Runtime.InteropServices;
 public static class ReaderCheckNative {
   [DllImport("user32.dll", EntryPoint="GetWindowLongW")] public static extern int GetWindowLong(IntPtr h, int index);
   [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+  [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr h, uint flags);
   [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
   [DllImport("user32.dll")] public static extern void mouse_event(uint flags, uint x, uint y, uint data, UIntPtr extra);
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr CreateWindowEx(uint ex, string cls, string title, uint style, int x, int y, int w, int h, IntPtr parent, IntPtr menu, IntPtr instance, IntPtr param);
@@ -61,6 +62,7 @@ $readLabel = -join [char[]]@(0x9605,0x8BFB)
 $startLabel = -join [char[]]@(0x5F00,0x59CB,0x9605,0x8BFB)
 $readerTitle = -join [char[]]@(0x9690,0x9605,0x20,0xB7,0x20,0x9605,0x8BFB,0x533A,0x57DF)
 $cover = [IntPtr]::Zero
+$coverForm = $null
 try {
   $main = Wait-For {
     $windows = [System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, $processCondition)
@@ -73,7 +75,7 @@ try {
     foreach ($window in $windows) { if ($window.Current.Name -eq $readerTitle) { return $window } }
   } 'Reader window not created'
   $start = Wait-For { Find-Button $reader $startLabel } 'First reader preview stayed hidden (without Adjust Reading Area)'
-  $readerHandle = [IntPtr]$reader.Current.NativeWindowHandle
+  $readerHandle = [ReaderCheckNative]::GetAncestor([IntPtr]$reader.Current.NativeWindowHandle, 2)
   if (![ReaderCheckNative]::IsWindowVisible($readerHandle)) { throw 'Reader native window is not visible' }
   if (([ReaderCheckNative]::GetWindowLong($readerHandle, -20) -band 8) -ne 0) { throw 'Reader is still topmost' }
   Write-Output 'First read displayed a visible preview without adjusting the reading area.'
@@ -88,10 +90,18 @@ try {
   [ReaderCheckNative]::Click([int]($bounds.X + $bounds.Width * 0.25), $bodyY)
   Wait-For { (Get-Content $LibraryPath -Raw | ConvertFrom-Json).books[0].offset -eq 0 } 'Left content click did not return to the same page' | Out-Null
   Write-Output 'Reader left/right content clicks saved and restored the original position.'
-  $cover = [ReaderCheckNative]::CreateWindowEx(0, 'STATIC', 'fishbaby smoke cover', [uint32]2147483648, [int]$bounds.X, [int]$bounds.Y, [int]$bounds.Width, [int]$bounds.Height, [IntPtr]::Zero, [IntPtr]::Zero, [IntPtr]::Zero, [IntPtr]::Zero)
-  if ($cover -eq [IntPtr]::Zero) { throw 'Could not create covering test window' }
-  if (![ReaderCheckNative]::SetWindowPos($cover, [IntPtr]::Zero, [int]$bounds.X, [int]$bounds.Y, [int]$bounds.Width, [int]$bounds.Height, 0x50)) { throw 'Could not position covering test window' }
-  if (![ReaderCheckNative]::IsWindowVisible($cover) -or ![ReaderCheckNative]::Above($cover, $readerHandle)) { throw 'Covering test window is not above the reader' }
+  $coverForm = [System.Windows.Forms.Form]::new()
+  $coverForm.Text = 'fishbaby smoke cover'
+  $coverForm.TopMost = $false
+  $coverForm.StartPosition = [System.Windows.Forms.FormStartPosition]::Manual
+  $coverForm.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
+  $coverForm.Bounds = [System.Drawing.Rectangle]::new([int]$bounds.X, [int]$bounds.Y, [int]$bounds.Width, [int]$bounds.Height)
+  $coverForm.Show()
+  $coverForm.BringToFront()
+  $coverForm.Activate()
+  $cover = $coverForm.Handle
+  Wait-For { [ReaderCheckNative]::IsWindowVisible($cover) -and [ReaderCheckNative]::Above($cover, $readerHandle) } 'Covering test window is not above the reader' | Out-Null
+  Write-Output "Cover root $cover is visible above reader root $readerHandle."
   Wait-State 'hidden'
   [ReaderCheckNative]::SetCursorPos([int]($bounds.X + $bounds.Width/2), $bodyY) | Out-Null
   Start-Sleep -Milliseconds 400
@@ -99,7 +109,9 @@ try {
   if (![ReaderCheckNative]::Above($cover, $readerHandle)) { throw 'Hover raised the reader above the covering window' }
   Wait-State 'hidden'
   Write-Output 'A later normal window covered the reader; mouse movement did not reveal or raise it.'
-  [ReaderCheckNative]::DestroyWindow($cover) | Out-Null
+  $coverForm.Close()
+  $coverForm.Dispose()
+  $coverForm = $null
   $cover = [IntPtr]::Zero
   Wait-State 'reading'
   Write-Output 'Reader resumed hover only after the covering window was removed.'
@@ -109,5 +121,5 @@ try {
   $errorText | Set-Content (Join-Path $DiagnosticsPath 'reader-workflow-error.txt')
   throw
 } finally {
-  if ($cover -ne [IntPtr]::Zero) { [ReaderCheckNative]::DestroyWindow($cover) | Out-Null }
+  if ($null -ne $coverForm) { $coverForm.Close(); $coverForm.Dispose() }
 }
