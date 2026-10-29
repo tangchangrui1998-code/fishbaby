@@ -1,9 +1,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod diagnostics;
 mod epub;
-#[cfg(target_os = "macos")]
-mod macos_geometry;
 mod publication;
+#[cfg(any(target_os = "macos", windows))]
+mod reader_geometry;
 mod text;
 #[cfg(windows)]
 mod windows_visibility;
@@ -93,7 +93,7 @@ struct Store {
     file: PathBuf,
     mode: Mutex<ReaderSession>,
     presentation: Mutex<ReaderView>,
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", windows))]
     geometry_generation: std::sync::atomic::AtomicU64,
 }
 #[derive(Clone, Serialize)]
@@ -401,7 +401,7 @@ fn save_settings(
     settings.background = settings.background.clamp(0., 1.);
     let resize = resize.unwrap_or(false);
     let reader = app.get_webview_window("reader");
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", windows)))]
     let live_size = reader.as_ref().and_then(|w| {
         let size = w.inner_size().ok()?;
         let scale = w.scale_factor().ok()?;
@@ -409,7 +409,7 @@ fn save_settings(
     });
     let store = app.state::<Store>();
     let mut data = store.library.lock().unwrap();
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", windows))]
     let live_size = Some((data.settings.width, data.settings.height));
     preserve_reader_size(&mut settings, resize, live_size);
     settings.x = data.settings.x;
@@ -419,6 +419,10 @@ fn save_settings(
     drop(data);
     if resize {
         if let Some(w) = reader {
+            #[cfg(any(target_os = "macos", windows))]
+            reader_geometry::resize_reader(&w, (settings.width, settings.height))
+                .map_err(|e| e.to_string())?;
+            #[cfg(not(any(target_os = "macos", windows)))]
             w.set_size(tauri::LogicalSize::new(settings.width, settings.height))
                 .map_err(|e| e.to_string())?;
         }
@@ -643,7 +647,7 @@ fn main() {
                 file,
                 mode: Mutex::new(ReaderSession::new("paused")),
                 presentation: Mutex::new(ReaderView::default()),
-                #[cfg(target_os = "macos")]
+                #[cfg(any(target_os = "macos", windows))]
                 geometry_generation: std::sync::atomic::AtomicU64::new(u64::MAX),
             });
             // Windows starts one WebView only. The reader is created by async read_book.
@@ -707,8 +711,8 @@ fn main() {
             startup_log("shortcuts-ready");
             let handle = app.handle().clone();
             std::thread::spawn(move || {
-                #[cfg(target_os = "macos")]
-                let mut geometry = macos_geometry::Protection::new();
+                #[cfg(any(target_os = "macos", windows))]
+                let mut geometry = reader_geometry::Protection::new();
                 let mut previous: Option<(String, bool, u64)> = None;
                 let mut last_snapshot = Instant::now() - Duration::from_secs(5);
                 let mut last_poll = Instant::now();
@@ -718,7 +722,7 @@ fn main() {
                     let Some(w) = handle.get_webview_window("reader") else {
                         continue;
                     };
-                    #[cfg(target_os = "macos")]
+                    #[cfg(any(target_os = "macos", windows))]
                     match geometry.reconcile(&w, &store) {
                         Ok(true) => {},
                         Ok(false) => continue,
@@ -854,37 +858,28 @@ fn main() {
                 }
             }
             if w.label() == "reader" {
-                #[cfg(target_os = "macos")]
-                macos_geometry::on_event(w, event);
-                #[cfg(not(target_os = "macos"))]
-                {
-                let geometry = match event {
-                    tauri::WindowEvent::Moved(p) => Some((Some(*p), None)),
-                    tauri::WindowEvent::Resized(size) if size.width > 0 && size.height > 0 => {
-                        Some((None, Some(*size)))
-                    }
-                    _ => None,
-                };
-                if let Some((position, size)) = geometry {
-                    let w = w.clone();
-                    tauri::async_runtime::spawn(async move {
-                        if let Some(store) = w.try_state::<Store>() {
-                            let scale = w.scale_factor().unwrap_or(1.);
+                #[cfg(any(target_os = "macos", windows))]
+                reader_geometry::on_event(w, event);
+                #[cfg(not(any(target_os = "macos", windows)))]
+                if let Some(store) = w.try_state::<Store>() {
+                    let scale = w.scale_factor().unwrap_or(1.);
+                    match event {
+                        tauri::WindowEvent::Moved(p) => {
                             let mut data = store.library.lock().unwrap();
-                            if let Some(p) = position {
-                                data.settings.x = Some(p.x as f64 / scale);
-                                data.settings.y = Some(p.y as f64 / scale);
-                            }
-                            if let Some(s) = size {
-                                data.settings.width = s.width as f64 / scale;
-                                data.settings.height = s.height as f64 / scale;
-                            }
+                            data.settings.x = Some(p.x as f64 / scale);
+                            data.settings.y = Some(p.y as f64 / scale);
+                            let _ = persist(&store, &data);
+                        }
+                        tauri::WindowEvent::Resized(size) if size.width > 0 && size.height > 0 => {
+                            let mut data = store.library.lock().unwrap();
+                            data.settings.width = size.width as f64 / scale;
+                            data.settings.height = size.height as f64 / scale;
                             let _ = persist(&store, &data);
                             drop(data);
                             changed(w.app_handle());
                         }
-                    });
-                }
+                        _ => {}
+                    }
                 }
             }
         })

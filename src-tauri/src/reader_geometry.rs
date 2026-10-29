@@ -1,9 +1,11 @@
-//! Keep the reading size stable when AppKit rearranges windows after a display change.
+//! Preserve logical reading dimensions across display scaling and system window rearrangements.
 use super::{changed, diagnostics, persist, Store};
 use serde_json::json;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 use tauri::Manager;
+#[cfg(windows)]
+mod windows;
 
 fn editable(mode: &str) -> bool {
     matches!(mode, "ready" | "setup")
@@ -25,15 +27,20 @@ trait GeometryWindow {
 }
 impl GeometryWindow for tauri::WebviewWindow {
     fn configure(&self, locked: bool, size: (f64, f64)) -> tauri::Result<()> {
-        self.set_size_constraints(tauri::WindowSizeConstraints {
-            min_width: Some(tauri::LogicalUnit(if locked { size.0 } else { 220. }).into()),
-            min_height: Some(tauri::LogicalUnit(if locked { size.1 } else { 90. }).into()),
-            max_width: locked.then(|| tauri::LogicalUnit(size.0).into()),
-            max_height: locked.then(|| tauri::LogicalUnit(size.1).into()),
-            ..Default::default()
-        })?;
-        self.set_resizable(!locked)?;
-        self.set_maximizable(false)
+        #[cfg(windows)]
+        return windows::configure(self.hwnd()?.0, locked).map_err(Into::into);
+        #[cfg(not(windows))]
+        {
+            self.set_size_constraints(tauri::WindowSizeConstraints {
+                min_width: Some(tauri::LogicalUnit(if locked { size.0 } else { 220. }).into()),
+                min_height: Some(tauri::LogicalUnit(if locked { size.1 } else { 90. }).into()),
+                max_width: locked.then(|| tauri::LogicalUnit(size.0).into()),
+                max_height: locked.then(|| tauri::LogicalUnit(size.1).into()),
+                ..Default::default()
+            })?;
+            self.set_resizable(!locked)?;
+            self.set_maximizable(false)
+        }
     }
     fn sample(&self) -> tauri::Result<(u32, u32, f64)> {
         let scale = self.scale_factor()?;
@@ -41,8 +48,23 @@ impl GeometryWindow for tauri::WebviewWindow {
         Ok((size.width, size.height, scale))
     }
     fn resize(&self, size: (f64, f64)) -> tauri::Result<()> {
+        #[cfg(windows)]
+        {
+            let scale = self.scale_factor()?;
+            windows::resize(
+                self.hwnd()?.0,
+                (size.0 * scale).round() as i32,
+                (size.1 * scale).round() as i32,
+            )
+            .map_err(Into::into)
+        }
+        #[cfg(not(windows))]
         self.set_size(tauri::LogicalSize::new(size.0, size.1))
     }
+}
+
+pub fn resize_reader(window: &tauri::WebviewWindow, size: (f64, f64)) -> tauri::Result<()> {
+    window.resize(size)
 }
 
 /// Owned by the polling worker. Never hold application locks across native calls.
@@ -112,8 +134,8 @@ impl Protection {
         }
         self.checked = Instant::now();
         if reconfigure {
-            // A hidden reader remains mounted for hit testing, so AppKit can
-            // still try to tile/resize it. Native constraints prevent this too.
+            // Hidden readers stay mounted for hover detection. Disable native
+            // resizing while reading, and repair system-driven size changes.
             window.configure(locked, expected)?;
             diagnostics::record(
                 "geometry-policy",
@@ -121,6 +143,12 @@ impl Protection {
                     "mode": mode, "generation": generation, "locked": locked, "logicalSize": expected,
                 }),
             );
+        }
+        #[cfg(windows)]
+        if locked && !reconfigure {
+            // Other Tauri window operations can reapply its cached style flags.
+            // Reassert native sizing without activation or z-order changes.
+            window.configure(locked, expected)?;
         }
         let (width, height, scale) = window.sample()?;
         let actual = logical_size(width, height, scale);
@@ -139,8 +167,8 @@ impl Protection {
             window.resize(expected)?;
             self.pending_restore = true;
             self.configuration = Some(next);
-            // macOS enqueues setContentSize asynchronously. Confirm on the next
-            // poll before displaying a reader or accepting resize preferences.
+            // Native sizing can be asynchronous. Confirm on the next poll before
+            // displaying a reader or accepting resize preferences.
             return Ok(false);
         }
         self.pending_restore = false;

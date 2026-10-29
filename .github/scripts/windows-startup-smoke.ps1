@@ -4,6 +4,8 @@ $installPath = Join-Path $env:RUNNER_TEMP 'fishbaby-installed'
 $diagnostics = Join-Path $env:RUNNER_TEMP 'fishbaby-diagnostics'
 New-Item -ItemType Directory -Force $diagnostics | Out-Null
 $logPath = Join-Path $diagnostics 'startup.log'
+$readerLogDirectory = Join-Path $env:LOCALAPPDATA 'com.fishbaby.reader/logs'
+$readerLogPath = Join-Path $readerLogDirectory 'reader.jsonl'
 $version = (Get-Content 'package.json' -Raw | ConvertFrom-Json).version
 $installers = @(Get-ChildItem "src-tauri/target/release/bundle/nsis/*_${version}_x64-setup.exe")
 if ($installers.Count -ne 1) { throw "Expected exactly one installer for $version, found $($installers.Count)" }
@@ -46,9 +48,10 @@ try {
   }
   if (!$ready) { throw 'Installed app did not render the bookshelf within 60 seconds' }
   Write-Output 'Installed Windows application rendered the bookshelf successfully.'
-  & "$env:WINDIR/System32/WindowsPowerShell/v1.0/powershell.exe" -NoProfile -MTA -File "$PSScriptRoot/windows-reader-check.ps1" -AppProcessId $app.Id -LogPath $logPath -LibraryPath $libraryFile -DiagnosticsPath $diagnostics
+  & "$env:WINDIR/System32/WindowsPowerShell/v1.0/powershell.exe" -NoProfile -MTA -File "$PSScriptRoot/windows-reader-check.ps1" -AppProcessId $app.Id -LogPath $logPath -LibraryPath $libraryFile -DiagnosticsPath $diagnostics -ReaderLogPath $readerLogPath
   if ($LASTEXITCODE -ne 0) { throw 'Installed reader workflow verification failed' }
 } finally {
+  if (Test-Path $readerLogDirectory) { Get-ChildItem $readerLogDirectory -Filter 'reader*.jsonl' | Copy-Item -Destination $diagnostics }
   $fallback = Join-Path $env:LOCALAPPDATA 'com.fishbaby.reader/logs/startup.log'
   if (Test-Path $fallback) { Copy-Item $fallback (Join-Path $diagnostics 'startup-default.log') }
   Get-ChildItem $diagnostics -Filter '*.log' | ForEach-Object { Write-Output $_.Name; Get-Content $_.FullName }

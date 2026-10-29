@@ -35,6 +35,7 @@
         "transparent": true,
         "shadow": false,
         "alwaysOnTop": false,
+        "maximizable": false,
         "visible": false,
         "skipTaskbar": true,
         "focus": false,
