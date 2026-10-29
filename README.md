@@ -4,7 +4,9 @@ macOS / Windows 悬浮文字阅读器。鼠标悬停在阅读区域时显示文�
 
 现已实现第一版桌面应用：
 
-- 本地 TXT 书架：批量导入、去重、移出。
+- 本地 TXT / EPUB 书架：批量导入、去重、移出；EPUB 优先使用书内标题。
+- 文本编码：自动读取 UTF-8（含 BOM）、GB18030/GBK/GB2312，以及带 BOM 的 UTF-16 LE/BE；原始文件保持不变。
+- EPUB 2/3：按书内章节顺序提取正文，保留标题与段落，使用阅读器的字体、主题和进度；首版不保留原书图片、CSS 排版或提供目录跳转，暂不支持 DRM 加密书和纯图片书。
 - 每本书独立保存阅读位置，切书和重启后继续阅读。原文件变化时尝试匹配原文，失败则按原百分比恢复。
 - 无边框置顶阅读窗口、150 毫秒悬停唤醒、滚轮翻页、整本书进度滚动条、暂停和位置调整。
 - 深色 / 浅色阅读主题，可在阅读窗口顶部直接切换并保存。
@@ -21,7 +23,7 @@ npm ci
 npm run desktop
 ```
 
-macOS 的书架和设置保存在 `~/Library/Application Support/com.fishbaby.reader/library.json`，Windows 保存在系统应用数据目录下的 `com.fishbaby.reader/library.json`；原始 TXT 保留在导入位置，应用不会上传内容或修改原文件。
+macOS 的书架和设置保存在 `~/Library/Application Support/com.fishbaby.reader/library.json`，Windows 保存在系统应用数据目录下的 `com.fishbaby.reader/library.json`；原始书籍保留在导入位置，应用不会上传内容或修改原文件。单文件上限 50 MB，EPUB 解压读取的正文及目录合计上限 50 MB。
 
 ## 检查与构建
 

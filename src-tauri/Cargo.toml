@@ -1,6 +1,6 @@
 [package]
 name = "fishbaby"
-version = "0.1.0"
+version = "0.1.2"
 edition = "2021"
 rust-version = "1.88"
 
@@ -14,3 +14,8 @@ tauri-plugin-global-shortcut = "=2.3.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
+encoding_rs = "0.8"
+zip = { version = "6", default-features = false, features = ["deflate"] }
+roxmltree = "0.21"
+scraper = "0.24"
+percent-encoding = "2"
