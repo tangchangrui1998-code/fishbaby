@@ -2,6 +2,8 @@
 mod epub;
 mod publication;
 mod text;
+#[cfg(windows)]
+mod windows_visibility;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -155,6 +157,8 @@ fn configure_reader(app: &tauri::AppHandle) -> tauri::Result<()> {
         .settings
         .clone();
     let w = app.get_webview_window("reader").expect("reader exists");
+    #[cfg(windows)]
+    w.set_always_on_top(false)?;
     w.set_size(tauri::LogicalSize::new(s.width, s.height))?;
     if let (Some(x), Some(y)) = (s.x, s.y) {
         w.set_position(tauri::LogicalPosition::new(x, y))?;
@@ -648,8 +652,9 @@ fn main() {
                         .unwrap_or(window_scale);
                     #[cfg(not(target_os = "macos"))]
                     let cursor_scale = window_scale;
-                    let inside = if let (Ok(p), Ok(o), Ok(s)) =
-                        (handle.cursor_position(), w.outer_position(), w.outer_size())
+                    let cursor = handle.cursor_position().ok();
+                    let inside = if let (Some(p), Ok(o), Ok(s)) =
+                        (cursor.as_ref(), w.outer_position(), w.outer_size())
                     {
                         cursor_in_reader(
                             (p.x, p.y),
@@ -661,9 +666,19 @@ fn main() {
                     } else {
                         false
                     };
+                    #[cfg(windows)]
+                    let uncovered = match (w.hwnd(), cursor.as_ref()) {
+                        (Ok(hwnd), Some(p)) => windows_visibility::can_reveal(
+                            hwnd.0,
+                            (p.x.round() as i32, p.y.round() as i32),
+                        ),
+                        _ => false,
+                    };
+                    #[cfg(not(windows))]
+                    let uncovered = true;
                     let (state, mounted, generation) = {
                         let mut session = store.mode.lock().unwrap();
-                        let state = session.update_exposure(inside, true, Instant::now());
+                        let state = session.update_exposure(inside, uncovered, Instant::now());
                         (
                             state,
                             reader_mounted(&session.name, state),
@@ -672,7 +687,10 @@ fn main() {
                     };
                     let next = (state.into(), mounted, generation);
                     if previous.as_ref() != Some(&next) {
-                        let _ = w.set_focusable(state == "setup" || state == "ready");
+                        // Windows hover must not change focusability/z-order; only
+                        // explicit preview/setup requests may bring the window forward.
+                        let _ =
+                            w.set_focusable(cfg!(windows) || state == "setup" || state == "ready");
                         let _ = w.set_ignore_cursor_events(state == "hidden");
                         // Hover hiding changes WebView visibility and hit testing only.
                         // Hiding the active NSWindow can restore the minimized main window.
@@ -683,7 +701,14 @@ fn main() {
                         } else {
                             let _ = w.hide();
                         }
+                        #[cfg(windows)]
+                        if matches!(state, "ready" | "setup")
+                            && previous.as_ref().is_none_or(|p| p.2 != generation)
+                        {
+                            let _ = w.set_focus();
+                        }
                         let view = store.presentation.lock().unwrap().publish(state);
+                        startup_log(&format!("reader-view {} {}", view.revision, view.state));
                         let _ = w.emit("reader-state", view);
                         previous = Some(next);
                     }
@@ -928,6 +953,10 @@ mod tests {
         );
         assert_eq!(
             windows.iter().find(|w| w["label"] == "reader").unwrap()["create"],
+            false
+        );
+        assert_eq!(
+            windows.iter().find(|w| w["label"] == "reader").unwrap()["alwaysOnTop"],
             false
         );
     }

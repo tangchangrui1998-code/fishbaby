@@ -46,7 +46,7 @@ jobs:
           }
       - name: Build NSIS installer
         run: npm run package:windows -- --ci
-      - name: Install and verify bookshelf startup
+      - name: Install and verify bookshelf and reader workflow
         shell: pwsh
         run: ./.github/scripts/windows-startup-smoke.ps1
       - name: Upload startup diagnostics
