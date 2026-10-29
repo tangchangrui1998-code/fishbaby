@@ -117,7 +117,13 @@ export class WheelPager {
   private distance = 0;
   private turned = false;
 
-  push(delta: number, mode: number, now: number, height: number): number {
+  push(
+    delta: number,
+    mode: number,
+    now: number,
+    height: number,
+    mouseMode = false,
+  ): number {
     if (!Number.isFinite(delta) || delta === 0) return 0;
     const direction = Math.sign(delta);
     if (now - this.lastEvent >= 180 || direction !== this.direction) {
@@ -126,6 +132,12 @@ export class WheelPager {
     }
     this.lastEvent = now;
     this.direction = direction;
+    if (mouseMode) {
+      // Each mouse tick is intentional, even with no idle gap between ticks.
+      this.distance = 0;
+      this.turned = true;
+      return direction;
+    }
     this.distance +=
       Math.abs(delta) * (mode === 1 ? 16 : mode === 2 ? height : 1);
     if (this.turned || this.distance < 40) return 0;

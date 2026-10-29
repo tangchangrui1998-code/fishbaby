@@ -36,6 +36,14 @@ enum Theme {
     Dark,
 }
 
+#[derive(Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum WheelMode {
+    #[default]
+    Mouse,
+    Trackpad,
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 struct Settings {
@@ -45,6 +53,7 @@ struct Settings {
     color: String,
     background: f64,
     single_line: bool,
+    wheel_mode: WheelMode,
     width: f64,
     height: f64,
     x: Option<f64>,
@@ -59,6 +68,7 @@ impl Default for Settings {
             color: "#26332e".into(),
             background: 0.92,
             single_line: false,
+            wheel_mode: WheelMode::Mouse,
             width: 420.,
             height: 160.,
             x: None,
@@ -846,10 +856,13 @@ mod tests {
     fn older_settings_default_to_light_and_themes_roundtrip() {
         let mut settings: Settings = serde_json::from_str(r##"{"fontSize":20}"##).unwrap();
         assert!(matches!(settings.theme, Theme::Light));
+        assert!(matches!(settings.wheel_mode, WheelMode::Mouse));
         settings.theme = Theme::Dark;
+        settings.wheel_mode = WheelMode::Trackpad;
         let restored: Settings =
             serde_json::from_slice(&serde_json::to_vec(&settings).unwrap()).unwrap();
         assert!(matches!(restored.theme, Theme::Dark));
+        assert!(matches!(restored.wheel_mode, WheelMode::Trackpad));
     }
     #[test]
     fn txt_import_normalizes_text_and_accepts_gbk() {

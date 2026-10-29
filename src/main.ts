@@ -25,6 +25,7 @@ interface Settings {
   color: string;
   background: number;
   singleLine: boolean;
+  wheelMode: "mouse" | "trackpad";
   width: number;
   height: number;
   x: number | null;
@@ -48,6 +49,7 @@ let data: Library = {
     color: "#26332e",
     background: 0.92,
     singleLine: false,
+    wheelMode: "mouse",
     width: 420,
     height: 160,
     x: null,
@@ -88,6 +90,8 @@ async function refresh() {
       );
     const theme = document.querySelector<HTMLSelectElement>("#theme");
     if (theme) theme.value = data.settings.theme;
+    (document.querySelector("#wheelMode") as HTMLSelectElement).value =
+      data.settings.wheelMode;
     (document.querySelector("#color") as HTMLInputElement).value =
       data.settings.color;
     (document.querySelector("#background") as HTMLInputElement).value = String(
@@ -151,7 +155,7 @@ async function importBooks() {
   });
 }
 function renderShelf() {
-  root.innerHTML = `<aside><div class="brand">隐阅<span>fishbaby</span></div><nav aria-label="主导航"><button class="selected" data-view="library" aria-current="page">书架</button><button data-view="preferences">阅读设置</button></nav><div class="side-bottom"><p>快捷键</p><dl><dt>暂停 / 继续</dt><dd>${shortcutModifier} ⇧ H</dd><dt>打开书架</dt><dd>${shortcutModifier} ⇧ O</dd></dl></div></aside><main><section id="library-view"><header><div class="heading"><h1>书架</h1><span id="count"></span></div><button id="import" class="primary">导入书籍</button></header><div class="toolbar"><span>最近阅读</span><div><button id="adjust">调整阅读区</button><button id="pause">暂停阅读</button></div></div><section id="books" aria-label="书籍"></section></section><section id="preferences-view" hidden><header><h1>阅读设置</h1></header><div class="fields"><section class="setting-group"><h2>外观</h2><label>主题<select id="theme"><option value="light" ${data.settings.theme === "light" ? "selected" : ""}>浅色</option><option value="dark" ${data.settings.theme === "dark" ? "selected" : ""}>深色</option></select></label><label>文字颜色<input id="color" type="color" value="${data.settings.color}"></label><label>背景不透明度<input id="background" type="range" min="0" max="1" step="0.05" value="${data.settings.background}"></label></section><section class="setting-group"><h2>排版</h2><label>字号<span><output id="fontSize-value">${data.settings.fontSize}</output><input id="fontSize" type="range" min="12" max="40" value="${data.settings.fontSize}"></span></label><label>行距<span><output id="lineHeight-value">${data.settings.lineHeight}</output><input id="lineHeight" type="range" min="1.2" max="2.5" step="0.1" value="${data.settings.lineHeight}"></span></label><label>单行阅读<input id="singleLine" type="checkbox" ${data.settings.singleLine ? "checked" : ""}></label></section><section class="setting-group"><h2>阅读窗口</h2><label>宽度<span><input id="width" type="number" min="220" max="1400" value="${data.settings.width}"> px</span></label><label>高度<span><input id="height" type="number" min="90" max="800" value="${data.settings.height}"> px</span></label><div class="setting-action"><span>拖动窗口顶部可调整位置</span><button id="reset">恢复居中</button></div></section></div></section><p id="notice" role="status" hidden></p></main>`;
+  root.innerHTML = `<aside><div class="brand">隐阅<span>fishbaby</span></div><nav aria-label="主导航"><button class="selected" data-view="library" aria-current="page">书架</button><button data-view="preferences">阅读设置</button></nav><div class="side-bottom"><p>快捷键</p><dl><dt>暂停 / 继续</dt><dd>${shortcutModifier} ⇧ H</dd><dt>打开书架</dt><dd>${shortcutModifier} ⇧ O</dd></dl></div></aside><main><section id="library-view"><header><div class="heading"><h1>书架</h1><span id="count"></span></div><button id="import" class="primary">导入书籍</button></header><div class="toolbar"><span>最近阅读</span><div><button id="adjust">调整阅读区</button><button id="pause">暂停阅读</button></div></div><section id="books" aria-label="书籍"></section></section><section id="preferences-view" hidden><header><h1>阅读设置</h1></header><div class="fields"><section class="setting-group"><h2>外观</h2><label>主题<select id="theme"><option value="light" ${data.settings.theme === "light" ? "selected" : ""}>浅色</option><option value="dark" ${data.settings.theme === "dark" ? "selected" : ""}>深色</option></select></label><label>文字颜色<input id="color" type="color" value="${data.settings.color}"></label><label>背景不透明度<input id="background" type="range" min="0" max="1" step="0.05" value="${data.settings.background}"></label></section><section class="setting-group"><h2>排版</h2><label>字号<span><output id="fontSize-value">${data.settings.fontSize}</output><input id="fontSize" type="range" min="12" max="40" value="${data.settings.fontSize}"></span></label><label>行距<span><output id="lineHeight-value">${data.settings.lineHeight}</output><input id="lineHeight" type="range" min="1.2" max="2.5" step="0.1" value="${data.settings.lineHeight}"></span></label><label>滚轮设备<select id="wheelMode"><option value="mouse" ${data.settings.wheelMode !== "trackpad" ? "selected" : ""}>鼠标滚轮</option><option value="trackpad" ${data.settings.wheelMode === "trackpad" ? "selected" : ""}>触控板</option></select></label><label>单行阅读<input id="singleLine" type="checkbox" ${data.settings.singleLine ? "checked" : ""}></label></section><section class="setting-group"><h2>阅读窗口</h2><label>宽度<span><input id="width" type="number" min="220" max="1400" value="${data.settings.width}"> px</span></label><label>高度<span><input id="height" type="number" min="90" max="800" value="${data.settings.height}"> px</span></label><div class="setting-action"><span>拖动窗口顶部可调整位置</span><button id="reset">恢复居中</button></div></section></div></section><p id="notice" role="status" hidden></p></main>`;
   document.querySelectorAll<HTMLButtonElement>("[data-view]").forEach(
     (button) =>
       (button.onclick = () => {
@@ -205,6 +209,9 @@ function renderShelf() {
       settings.singleLine = (
         document.getElementById("singleLine") as HTMLInputElement
       ).checked;
+      settings.wheelMode = (
+        document.getElementById("wheelMode") as HTMLSelectElement
+      ).value as Settings["wheelMode"];
       const theme = (document.getElementById("theme") as HTMLSelectElement)
         .value as Theme;
       if (theme !== settings.theme) {
@@ -430,6 +437,7 @@ function renderReader() {
         event.deltaMode,
         performance.now(),
         root.clientHeight,
+        data.settings.wheelMode !== "trackpad",
       );
       if (direction) void action(() => turn(direction));
     },

@@ -136,6 +136,21 @@ test("wheel line and page units work and accidental small motions do not flip pa
   assert.equal(wheel.push(1, 2, 600, 200), 1);
   assert.equal(wheel.push(NaN, 0, 900, 200), 0);
 });
+test("consecutive mouse wheel ticks each turn a page without a gesture idle gap", () => {
+  const wheel = new WheelPager();
+  for (const now of [0, 30, 60, 90]) {
+    assert.equal(wheel.push(1, 1, now, 200, true), 1);
+  }
+  for (const now of [120, 150, 180]) {
+    assert.equal(wheel.push(3, 0, now, 200, true), 1);
+  }
+  assert.equal(wheel.push(-3, 0, 210, 200, true), -1);
+});
+test("mouse mode handles small pixel ticks without relying on browser-specific delta values", () => {
+  const wheel = new WheelPager();
+  for (const [index, delta] of [0.5, 1, 3, 10, 100, 120].entries())
+    assert.equal(wheel.push(delta, 0, index * 15, 200, true), 1);
+});
 test("page boundaries do not split emoji surrogate pairs", () => {
   const text = "甲😀乙";
   assert.equal(boundary(text, 2), 1);
