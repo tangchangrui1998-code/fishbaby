@@ -11,10 +11,28 @@
       .reader #overlay {
         border: 1px solid #ddd;
       }
+      #fixture-controls {
+        position: fixed;
+        left: 600px;
+        top: 20px;
+        width: 220px;
+        display: grid;
+        gap: 10px;
+      }
     </style>
   </head>
   <body>
     <div id="app"></div>
+    <div id="fixture-controls">
+      <button id="fixture-small">小窗口（300 × 200）</button>
+      <button id="fixture-large">大窗口（560 × 320）</button>
+      <button id="fixture-tiny">极小窗口（220 × 90）</button>
+      <button id="fixture-font">切换字号</button>
+      <button id="fixture-single">切换单行</button>
+      <button id="fixture-reopen">重新载入书籍</button>
+      <button id="fixture-reset">重置测试进度</button>
+      <output id="fixture-saved">尚未保存</output>
+    </div>
     <script type="module">
       import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
       import { emit } from "@tauri-apps/api/event";
@@ -29,7 +47,7 @@
         id: "fixture",
         title: "阅读测试",
         path: "fixture.txt",
-        offset: 0,
+        offset: Number(sessionStorage.getItem("reader-fixture-offset") || 0),
         length: text.length,
         lastRead: 0,
         available: true,
@@ -56,7 +74,13 @@
           if (cmd === "current_text") return [structuredClone(book), text];
           if (cmd === "save_progress") {
             book.offset = args.offset;
+            sessionStorage.setItem(
+              "reader-fixture-offset",
+              String(book.offset),
+            );
             document.title = `saved:${book.offset}`;
+            document.querySelector("#fixture-saved").textContent =
+              `已保存原文位置：${book.offset}`;
             return;
           }
           if (cmd === "save_settings") {
@@ -75,6 +99,31 @@
         },
         { shouldMockEvents: true },
       );
+      for (const [name, width, height] of [
+        ["small", 300, 200],
+        ["large", 560, 320],
+        ["tiny", 220, 90],
+      ]) {
+        document.querySelector(`#fixture-${name}`).onclick = () => {
+          document.querySelector("#app").style.width = `${width}px`;
+          document.querySelector("#app").style.height = `${height}px`;
+        };
+      }
+      document.querySelector("#fixture-font").onclick = async () => {
+        data.settings.fontSize = data.settings.fontSize === 18 ? 24 : 18;
+        await emit("library-changed", null);
+      };
+      document.querySelector("#fixture-single").onclick = async () => {
+        data.settings.singleLine = !data.settings.singleLine;
+        await emit("library-changed", null);
+      };
+      document.querySelector("#fixture-reopen").onclick = () =>
+        emit("book-changed", book.id);
+      document.querySelector("#fixture-reset").onclick = () => {
+        book.offset = 0;
+        sessionStorage.removeItem("reader-fixture-offset");
+        return emit("book-changed", book.id);
+      };
       await import("/src/main.ts");
       await new Promise((r) => setTimeout(r, 100));
       await emit("reader-state", "ready");

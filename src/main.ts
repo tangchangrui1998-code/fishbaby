@@ -2,8 +2,7 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
-import { boundary, pageEnd, previousStart } from "./reader";
-import { scrollGeometry, scrollOffset } from "./scrollbar";
+import { boundary, PageReader, WheelPager } from "./reader";
 import "./style.css";
 interface Book {
   id: string;
@@ -222,66 +221,49 @@ function renderShelf() {
   renderBooks();
 }
 let readerState = "hidden";
-let text = "",
-  book: Book | null = null,
-  end = 0,
-  lastWheel = 0;
-let lastPageStart = 0,
-  layoutKey = "",
-  scrollDrag: { id: number; grab: number } | null = null,
-  scrollFrame = 0,
-  saveTimer: ReturnType<typeof setTimeout> | undefined;
+let text = "";
+let book: Book | null = null;
+let pages: PageReader | null = null;
+let layoutKey = "";
+let layoutReady = false;
+let resizeTimer: ReturnType<typeof setTimeout> | undefined;
+let saveQueue: Promise<unknown> = Promise.resolve();
+const wheelPager = new WheelPager();
 function fitsText(part: string) {
   const el = document.querySelector<HTMLElement>("#text")!;
-  el.textContent = part;
+  // Line breaks at a page boundary belong to this page, not a blank next page.
+  el.textContent = part.trimEnd();
   return (
     el.scrollHeight <= el.clientHeight + 1 &&
     el.scrollWidth <= el.clientWidth + 1
   );
 }
-function syncScrollbar() {
-  const track = document.querySelector<HTMLElement>("#reader-scrollbar")!;
-  const thumb = document.querySelector<HTMLElement>("#scroll-thumb")!;
-  const geometry = scrollGeometry(
-    text.length,
-    book?.offset ?? 0,
-    end - (book?.offset ?? 0),
-    lastPageStart,
-    track.clientHeight,
-  );
-  thumb.style.height = `${geometry.height}px`;
-  thumb.style.transform = `translateY(${geometry.top}px)`;
-  track.setAttribute("aria-valuemax", String(lastPageStart));
-  track.setAttribute("aria-valuenow", String(book?.offset ?? 0));
-  track.setAttribute(
-    "aria-valuetext",
-    `${book ? percent({ ...book, length: text.length }) : 0}%`,
-  );
-  track.setAttribute("aria-disabled", String(lastPageStart === 0));
-}
-async function persistPosition() {
-  if (!book) return;
+function persistPosition() {
+  if (!book) return Promise.resolve();
   const { id, offset } = book;
-  await invoke("save_progress", {
-    id,
-    offset,
-    anchor: text.slice(offset, boundary(text, offset + 120)),
-  });
+  const anchor = text.slice(offset, boundary(text, offset + 120));
+  const save = saveQueue
+    .catch(() => {})
+    .then(() => invoke("save_progress", { id, offset, anchor }));
+  saveQueue = save;
+  return save;
 }
-function seek(ratio: number) {
-  if (!book) return;
-  book.offset = scrollOffset(text, ratio, lastPageStart);
-  paginate();
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => void action(persistPosition), 180);
+function syncPageControls() {
+  const previous = document.querySelector<HTMLButtonElement>("#previous-page")!;
+  const next = document.querySelector<HTMLButtonElement>("#next-page")!;
+  previous.disabled = !layoutReady || !pages || pages.offset === 0;
+  next.disabled = !layoutReady || !pages || pages.end >= text.length;
+  document.querySelector("#page-progress")!.textContent = book
+    ? `${pages && pages.end >= text.length ? 100 : percent({ ...book, length: text.length })}%`
+    : "—";
 }
-
 function styleReader() {
   const el = document.querySelector<HTMLElement>("#text");
   if (!el) return;
   const s = data.settings;
   el.style.fontSize = `${s.fontSize}px`;
   el.style.lineHeight = String(s.lineHeight);
+  el.style.maxHeight = s.singleLine ? `${s.fontSize * s.lineHeight}px` : "";
   el.style.color = s.color;
   const palette = themes[s.theme];
   const overlay = document.querySelector<HTMLElement>("#overlay")!;
@@ -298,69 +280,70 @@ function styleReader() {
   paginate();
 }
 function paginate() {
-  if (!book || !text) return;
   const el = document.querySelector<HTMLElement>("#text")!;
-  const key = [
-    book.id,
-    text.length,
+  const hint = document.querySelector<HTMLElement>("#layout-hint")!;
+  layoutReady =
+    !!book &&
+    !!pages &&
+    el.clientHeight + 1 >= parseFloat(getComputedStyle(el).lineHeight);
+  hint.hidden = !book || layoutReady;
+  el.style.visibility = hint.hidden ? "" : "hidden";
+  if (!book || !pages || !layoutReady) {
+    syncPageControls();
+    return;
+  }
+  layoutKey = [
     el.clientWidth,
     el.clientHeight,
     data.settings.fontSize,
     data.settings.lineHeight,
     data.settings.singleLine,
   ].join(":");
-  if (key !== layoutKey) {
-    lastPageStart = previousStart(
-      text,
-      text.trimEnd().length || text.length,
-      fitsText,
-    );
-    layoutKey = key;
-  }
-  book.offset = boundary(text, Math.min(book.offset, lastPageStart));
-  end = pageEnd(text, book.offset, fitsText);
-  el.textContent = text.slice(book.offset, end);
-  document.querySelector("#position")!.textContent =
-    `${book.title} · ${percent({ ...book, length: text.length })}%`;
-  syncScrollbar();
+  pages.layout(layoutKey, fitsText);
+  book.offset = pages.offset;
+  el.textContent = text.slice(pages.offset, pages.end).trimEnd();
+  el.scrollTop = 0;
+  el.scrollLeft = 0;
+  document.querySelector("#position")!.textContent = book.title;
+  syncPageControls();
 }
 async function loadCurrent() {
   try {
-    clearTimeout(saveTimer);
+    clearTimeout(resizeTimer);
     [book, text] = await invoke<[Book, string]>("current_text");
-    layoutKey = "";
+    pages = new PageReader(text, book.offset);
     styleReader();
   } catch {
     book = null;
+    pages = null;
     text = "";
+    document.querySelector("#position")!.textContent = "";
     document.querySelector("#text")!.textContent = "请在书架中选择一本书";
+    paginate();
   }
 }
 async function turn(direction: number) {
-  if (!book || !text) return;
-  const el = document.querySelector<HTMLElement>("#text")!;
-  const offset =
-    direction > 0
-      ? end < text.length
-        ? end
-        : book.offset
-      : previousStart(text, book.offset, (s) => {
-          el.textContent = s;
-          return (
-            el.scrollHeight <= el.clientHeight + 1 &&
-            el.scrollWidth <= el.clientWidth + 1
-          );
-        });
-  book.offset = offset;
+  // Finish a pending reflow before using any cached page boundary.
+  clearTimeout(resizeTimer);
   paginate();
-  clearTimeout(saveTimer);
+  if (!pages || !book || !layoutReady) return;
+  if (!pages.turn(direction, layoutKey, fitsText)) return;
+  paginate();
+  await persistPosition();
+}
+async function jump(last: boolean) {
+  clearTimeout(resizeTimer);
+  paginate();
+  if (!pages || !book || !layoutReady) return;
+  pages.jump(last, layoutKey, fitsText);
+  paginate();
   await persistPosition();
 }
 function renderReader() {
   document.documentElement.classList.add("reader-root");
   document.body.classList.add("reader");
   root.innerHTML =
-    '<section id="overlay" class="hidden"><div class="drag"><span id="position"></span><button id="theme-toggle" aria-label="切换主题">深色</button><button id="start">开始阅读</button><button id="back">返回书架</button></div><div class="reader-content"><div id="text"></div><div id="reader-scrollbar" role="scrollbar" tabindex="0" aria-label="阅读进度" aria-orientation="vertical" aria-controls="text" aria-valuemin="0"><div id="scroll-thumb"></div></div></div><p id="notice" hidden></p></section>';
+    '<section id="overlay" class="hidden" tabindex="0" aria-label="阅读窗口"><div class="drag"><span id="position"></span><button id="theme-toggle" aria-label="切换主题">深色</button><button id="start">开始阅读</button><button id="back">返回书架</button></div><div class="reader-content"><div id="text"></div><span id="layout-hint" hidden>请调高窗口以显示完整文字</span></div><nav class="page-controls" aria-label="翻页"><button id="previous-page" aria-controls="text" title="上一页（← / Page Up）" disabled>上一页</button><output id="page-progress" aria-label="阅读进度" aria-live="polite">—</output><button id="next-page" aria-controls="text" title="下一页（→ / 空格 / Page Down）" disabled>下一页</button></nav><p id="notice" hidden></p></section>';
   document.querySelector("#theme-toggle")!.addEventListener("click", () =>
     action(async () => {
       const latest = await invoke<Library>("library");
@@ -378,7 +361,6 @@ function renderReader() {
   );
   document.querySelector("#back")!.addEventListener("click", () =>
     action(async () => {
-      clearTimeout(saveTimer);
       await persistPosition();
       await invoke("return_to_shelf");
     }),
@@ -398,71 +380,40 @@ function renderReader() {
     () => void action(() => invoke("reader_pointer", { inside: true })),
   );
   overlay.addEventListener("pointerleave", () => {
-    if (!scrollDrag)
-      void action(() => invoke("reader_pointer", { inside: false }));
+    void action(() => invoke("reader_pointer", { inside: false }));
   });
-  const track = document.querySelector<HTMLElement>("#reader-scrollbar")!;
-  const thumb = document.querySelector<HTMLElement>("#scroll-thumb")!;
-  const dragSeek = (event: PointerEvent) => {
-    const rect = track.getBoundingClientRect();
-    const travel = Math.max(1, rect.height - thumb.offsetHeight);
-    seek(
-      (event.clientY -
-        rect.top -
-        (scrollDrag?.grab ?? thumb.offsetHeight / 2)) /
-        travel,
-    );
-  };
-  track.addEventListener("pointerdown", (event) => {
-    if (!book || lastPageStart === 0) return;
-    event.preventDefault();
-    clearTimeout(saveTimer);
-    scrollDrag = {
-      id: event.pointerId,
-      grab:
-        event.target === thumb
-          ? event.clientY - thumb.getBoundingClientRect().top
-          : thumb.offsetHeight / 2,
-    };
-    track.setPointerCapture(event.pointerId);
-    void invoke("reader_pointer", { inside: true });
-    dragSeek(event);
+  overlay.addEventListener("pointerdown", (event) => {
+    if (!(event.target as HTMLElement).closest("button"))
+      (overlay as HTMLElement).focus({ preventScroll: true });
   });
-  track.addEventListener("pointermove", (event) => {
-    if (!scrollDrag || scrollDrag.id !== event.pointerId) return;
-    cancelAnimationFrame(scrollFrame);
-    scrollFrame = requestAnimationFrame(() => dragSeek(event));
-  });
-  const finishDrag = (event: PointerEvent) => {
-    if (!scrollDrag) return;
-    cancelAnimationFrame(scrollFrame);
-    dragSeek(event);
-    scrollDrag = null;
-    clearTimeout(saveTimer);
-    void action(persistPosition);
-    const bounds = overlay.getBoundingClientRect();
-    void invoke("reader_pointer", {
-      inside:
-        event.clientX >= bounds.left &&
-        event.clientX < bounds.right &&
-        event.clientY >= bounds.top &&
-        event.clientY < bounds.bottom,
-    });
-  };
-  track.addEventListener("pointerup", finishDrag);
-  track.addEventListener("pointercancel", finishDrag);
-  track.addEventListener("keydown", (event) => {
+  document
+    .querySelector("#previous-page")!
+    .addEventListener("click", () => void action(() => turn(-1)));
+  document
+    .querySelector("#next-page")!
+    .addEventListener("click", () => void action(() => turn(1)));
+  document.addEventListener("keydown", (event) => {
     if (
-      ["ArrowDown", "PageDown", "ArrowUp", "PageUp", "Home", "End"].includes(
-        event.key,
-      )
+      readerState === "hidden" ||
+      event.ctrlKey ||
+      event.metaKey ||
+      event.altKey ||
+      event.isComposing
     )
-      event.preventDefault();
-    if (["ArrowDown", "PageDown"].includes(event.key))
-      void action(() => turn(1));
-    if (["ArrowUp", "PageUp"].includes(event.key)) void action(() => turn(-1));
-    if (event.key === "Home") seek(0);
-    if (event.key === "End") seek(1);
+      return;
+    const target = event.target as HTMLElement;
+    if (target.closest("input, textarea, select, [contenteditable=true]"))
+      return;
+    if (event.key === " " && target.closest("button")) return;
+    let direction = 0;
+    if (["ArrowRight", "ArrowDown", "PageDown"].includes(event.key))
+      direction = 1;
+    if (["ArrowLeft", "ArrowUp", "PageUp"].includes(event.key)) direction = -1;
+    if (event.key === " ") direction = event.shiftKey ? -1 : 1;
+    if (!direction && !["Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    if (direction) void action(() => turn(direction));
+    else void action(() => jump(event.key === "End"));
   });
   document.querySelector(".drag")!.addEventListener("mousedown", (e) => {
     if ((e.target as HTMLElement).closest("button")) return;
@@ -470,16 +421,24 @@ function renderReader() {
   });
   document.addEventListener(
     "wheel",
-    (e) => {
-      e.preventDefault();
-      if (scrollDrag) return;
-      if (Math.abs(e.deltaY) < 2 || Date.now() - lastWheel < 180) return;
-      lastWheel = Date.now();
-      void action(() => turn(Math.sign(e.deltaY)));
+    (event) => {
+      if (readerState === "hidden" || event.ctrlKey || event.metaKey) return;
+      if (Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
+      event.preventDefault();
+      const direction = wheelPager.push(
+        event.deltaY,
+        event.deltaMode,
+        performance.now(),
+        root.clientHeight,
+      );
+      if (direction) void action(() => turn(direction));
     },
     { passive: false },
   );
-  new ResizeObserver(paginate).observe(document.querySelector("#text")!);
+  new ResizeObserver(() => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(paginate, 120);
+  }).observe(document.querySelector("#text")!);
 }
 async function boot() {
   if (!isTauri()) {
