@@ -1,4 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+mod epub;
+mod publication;
+mod text;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -168,21 +171,7 @@ fn library(app: tauri::AppHandle) -> Library {
     }
 }
 fn text_at(path: &str) -> Result<String, String> {
-    let p = PathBuf::from(path);
-    if !p.extension().is_some_and(|x| x.eq_ignore_ascii_case("txt")) {
-        return Err("请选择 TXT 文件".into());
-    }
-    let raw = fs::read(p).map_err(|_| "文件不可用，请移出后重新导入".to_string())?;
-    if raw.len() > 50 * 1024 * 1024 {
-        return Err("首版支持 50 MB 以内的 TXT".into());
-    }
-    let text = String::from_utf8(raw)
-        .map_err(|_| "文件不是 UTF-8 编码，请转换编码后重新导入".to_string())?;
-    let text = text.trim_start_matches('\u{feff}').replace("\r\n", "\n");
-    if text.trim().is_empty() {
-        return Err("文件中没有可阅读的文字".into());
-    }
-    Ok(text)
+    publication::read(path).map(|book| book.text)
 }
 #[tauri::command]
 fn import_books(app: tauri::AppHandle, paths: Vec<String>) -> Result<Vec<String>, String> {
@@ -194,18 +183,21 @@ fn import_books(app: tauri::AppHandle, paths: Vec<String>) -> Result<Vec<String>
             .map_err(|e| e.to_string())
             .and_then(|p| {
                 let p = p.to_string_lossy().to_string();
-                text_at(&p).map(|t| (p, t))
+                publication::read(&p).map(|book| (p, book))
             }) {
-            Ok((path, text)) => {
+            Ok((path, content)) => {
                 if data.books.iter().any(|b| b.path == path) {
                     continue;
                 }
                 let id = format!("{:x}", Sha256::digest(path.as_bytes()));
-                let title = PathBuf::from(&path)
-                    .file_stem()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .into_owned();
+                let title = content.title.unwrap_or_else(|| {
+                    PathBuf::from(&path)
+                        .file_stem()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .into_owned()
+                });
+                let text = content.text;
                 data.books.push(Book {
                     id,
                     title,
@@ -860,14 +852,16 @@ mod tests {
         assert!(matches!(restored.theme, Theme::Dark));
     }
     #[test]
-    fn txt_import_normalizes_bom_and_newlines_and_rejects_invalid_utf8() {
+    fn txt_import_normalizes_text_and_accepts_gbk() {
         let path = std::env::temp_dir().join(format!("fishbaby-{}.txt", std::process::id()));
         fs::write(&path, "\u{feff}甲😀\r\n乙").unwrap();
         assert_eq!(text_at(path.to_str().unwrap()).unwrap(), "甲😀\n乙");
-        fs::write(&path, [0xff, 0xfe]).unwrap();
+        fs::write(&path, [0xd6, 0xd0, 0xce, 0xc4]).unwrap();
+        assert_eq!(text_at(path.to_str().unwrap()).unwrap(), "中文");
+        fs::write(&path, [0x81]).unwrap();
         assert!(text_at(path.to_str().unwrap())
             .unwrap_err()
-            .contains("UTF-8"));
+            .contains("无法解码"));
         fs::remove_file(path).unwrap();
     }
     #[test]
