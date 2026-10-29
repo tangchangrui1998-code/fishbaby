@@ -1,4 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+mod diagnostics;
 mod epub;
 mod publication;
 mod text;
@@ -112,6 +113,27 @@ impl ReaderView {
 #[tauri::command]
 fn reader_state(app: tauri::AppHandle) -> ReaderView {
     app.state::<Store>().presentation.lock().unwrap().clone()
+}
+#[tauri::command]
+fn reader_report(
+    window: tauri::WebviewWindow,
+    revision: u64,
+    state: String,
+    hovered: bool,
+    visible: bool,
+    content_visible: bool,
+) {
+    if window.label() == "reader"
+        && ["hidden", "reading", "ready", "setup"].contains(&state.as_str())
+    {
+        diagnostics::record(
+            "frontend-view",
+            serde_json::json!({
+            "revision": revision, "state": state, "hovered": hovered, "pageVisible": visible,
+            "contentVisible": content_visible,
+            }),
+        );
+    }
 }
 fn now() -> u64 {
     SystemTime::now()
@@ -335,7 +357,12 @@ fn start_reading(app: tauri::AppHandle) -> Result<(), String> {
 }
 #[tauri::command]
 fn reader_pointer(app: tauri::AppHandle, inside: bool) {
-    app.state::<Store>().mode.lock().unwrap().pointer_inside = Some(inside);
+    app.state::<Store>()
+        .mode
+        .lock()
+        .unwrap()
+        .set_pointer(inside, Instant::now());
+    diagnostics::record("pointer-event", serde_json::json!({ "inside": inside }));
 }
 fn change_mode(
     app: tauri::AppHandle,
@@ -401,6 +428,7 @@ struct ReaderSession {
     name: String,
     entered_at: Option<Instant>,
     pointer_inside: Option<bool>,
+    pointer_at: Option<Instant>,
     generation: u64,
 }
 impl ReaderSession {
@@ -409,6 +437,7 @@ impl ReaderSession {
             name: name.into(),
             generation: 0,
             pointer_inside: None,
+            pointer_at: None,
             // Starting from the reader button should not flash hidden for 150 ms.
             entered_at: (name == "hover").then(|| Instant::now() - Duration::from_millis(150)),
         }
@@ -420,7 +449,17 @@ impl ReaderSession {
         let generation = self.generation + 1;
         *self = Self::new(name);
         self.generation = generation;
-        self.pointer_inside = pointer_inside;
+        if let Some(inside) = pointer_inside {
+            self.set_pointer(inside, Instant::now());
+        }
+        diagnostics::record(
+            "mode",
+            serde_json::json!({ "mode": name, "generation": generation }),
+        );
+    }
+    fn set_pointer(&mut self, inside: bool, now: Instant) {
+        self.pointer_inside = Some(inside);
+        self.pointer_at = Some(now);
     }
     fn update_exposure(&mut self, inside: bool, uncovered: bool, now: Instant) -> &'static str {
         if self.name == "hover" && !uncovered {
@@ -431,6 +470,25 @@ impl ReaderSession {
         self.update(inside, now)
     }
     fn update(&mut self, global_inside: bool, now: Instant) -> &'static str {
+        // DOM leave can be lost during pointer capture, native dragging or WebView
+        // focus changes. A positive hint only bridges the Start click; it must
+        // never override the desktop cursor indefinitely. 90 ms + 30 ms polling
+        // keeps a missed leave within the 150 ms hide budget.
+        if self.pointer_inside == Some(true)
+            && self
+                .pointer_at
+                .is_none_or(|at| now.saturating_duration_since(at) >= Duration::from_millis(90))
+        {
+            if !global_inside {
+                diagnostics::record(
+                    "pointer-hint-expired-outside",
+                    serde_json::json!({
+                        "mode": self.name,
+                    }),
+                );
+            }
+            self.pointer_inside = None;
+        }
         let inside = self.pointer_inside.unwrap_or(global_inside);
         match self.name.as_str() {
             "ready" => "ready",
@@ -469,10 +527,12 @@ fn main() {
             start_reading,
             reader_pointer,
             reader_state,
+            reader_report,
             reset_position,
             return_to_shelf
         ])
         .setup(|app| {
+            diagnostics::init(app.path().app_log_dir()?);
             let dir = app.path().app_data_dir()?;
             fs::create_dir_all(&dir)?;
             let file = dir.join("library.json");
@@ -564,6 +624,8 @@ fn main() {
             let handle = app.handle().clone();
             std::thread::spawn(move || {
                 let mut previous: Option<(String, bool, u64)> = None;
+                let mut last_snapshot = Instant::now() - Duration::from_secs(5);
+                let mut last_poll = Instant::now();
                 loop {
                     std::thread::sleep(Duration::from_millis(30));
                     let store = handle.state::<Store>();
@@ -580,8 +642,13 @@ fn main() {
                         .unwrap_or(window_scale);
                     #[cfg(not(target_os = "macos"))]
                     let cursor_scale = window_scale;
+                    let cursor = handle.cursor_position();
+                    let origin = w.outer_position();
+                    let size = w.outer_size();
+                    let poll_gap = last_poll.elapsed().as_millis();
+                    last_poll = Instant::now();
                     let inside = if let (Ok(p), Ok(o), Ok(s)) =
-                        (handle.cursor_position(), w.outer_position(), w.outer_size())
+                        (cursor.as_ref(), origin.as_ref(), size.as_ref())
                     {
                         cursor_in_reader(
                             (p.x, p.y),
@@ -603,20 +670,51 @@ fn main() {
                         )
                     };
                     let next = (state.into(), mounted, generation);
+                    if previous.as_ref() != Some(&next) || last_snapshot.elapsed() >= Duration::from_secs(5) {
+                        let session = store.mode.lock().unwrap();
+                        diagnostics::record("reader-snapshot", serde_json::json!({
+                            "mode": session.name, "state": state, "mounted": mounted,
+                            "generation": generation, "globalInside": inside,
+                            "pointerHint": session.pointer_inside,
+                            "pointerAgeMs": session.pointer_at.map(|at| at.elapsed().as_millis()),
+                            "cursor": cursor.as_ref().ok().map(|p| (p.x, p.y)),
+                            "origin": origin.as_ref().ok().map(|p| (p.x, p.y)),
+                            "size": size.as_ref().ok().map(|s| (s.width, s.height)),
+                            "cursorScale": cursor_scale, "windowScale": window_scale,
+                            "pollGapMs": poll_gap,
+                            "cursorError": cursor.as_ref().err().map(|e| e.to_string()),
+                            "originError": origin.as_ref().err().map(|e| e.to_string()),
+                            "sizeError": size.as_ref().err().map(|e| e.to_string()),
+                        }));
+                        last_snapshot = Instant::now();
+                    }
                     if previous.as_ref() != Some(&next) {
-                        let _ = w.set_focusable(state == "setup" || state == "ready");
-                        let _ = w.set_ignore_cursor_events(state == "hidden");
+                        if let Err(error) = w.set_focusable(state == "setup" || state == "ready") {
+                            diagnostics::record("focusable-error", serde_json::json!({ "error": error.to_string() }));
+                        }
+                        if let Err(error) = w.set_ignore_cursor_events(state == "hidden") {
+                            diagnostics::record("hit-test-error", serde_json::json!({ "error": error.to_string() }));
+                            continue;
+                        }
                         // Hover hiding changes WebView visibility and hit testing only.
                         // Hiding the active NSWindow can restore the minimized main window.
                         if mounted {
                             if !w.is_visible().unwrap_or(false) {
-                                let _ = w.show();
+                                if let Err(error) = w.show() {
+                                    diagnostics::record("show-error", serde_json::json!({ "error": error.to_string() }));
+                                    continue;
+                                }
                             }
-                        } else {
-                            let _ = w.hide();
+                        } else if let Err(error) = w.hide() {
+                            diagnostics::record("hide-error", serde_json::json!({ "error": error.to_string() }));
+                            continue;
                         }
                         let view = store.presentation.lock().unwrap().publish(state);
-                        let _ = w.emit("reader-state", view);
+                        if let Err(error) = w.emit("reader-state", &view) {
+                            diagnostics::record("emit-error", serde_json::json!({ "error": error.to_string() }));
+                            continue;
+                        }
+                        diagnostics::record("reader-view", serde_json::json!({ "revision": view.revision, "state": view.state }));
                         previous = Some(next);
                     }
                 }
@@ -693,7 +791,7 @@ mod tests {
     #[test]
     fn covering_reader_clears_stale_pointer_hint_and_requires_fresh_hover() {
         let mut session = ReaderSession::new("hover");
-        session.pointer_inside = Some(true);
+        session.set_pointer(true, Instant::now());
         let now = Instant::now();
         assert_eq!(session.update_exposure(true, true, now), "reading");
         assert_eq!(session.update_exposure(true, false, now), "hidden");
@@ -791,14 +889,59 @@ mod tests {
     fn start_click_uses_reader_pointer_until_exit_then_global_position_can_wake_it() {
         let mut session = ReaderSession::new("hover");
         let now = Instant::now();
-        session.pointer_inside = Some(true);
+        session.set_pointer(true, Instant::now());
         assert_eq!(session.update(false, now), "reading");
-        session.pointer_inside = Some(false);
+        session.set_pointer(false, Instant::now());
         assert_eq!(session.update(false, now), "hidden");
         assert_eq!(session.update(true, now), "hidden");
         assert_eq!(
             session.update(true, now + Duration::from_millis(150)),
             "reading"
+        );
+    }
+    #[test]
+    fn missed_pointer_leave_expires_and_hides_without_a_dom_event() {
+        let mut session = ReaderSession::new("hover");
+        let now = Instant::now();
+        session.set_pointer(true, now);
+        assert_eq!(session.update(false, now), "reading");
+        assert_eq!(
+            session.update(false, now + Duration::from_millis(89)),
+            "reading"
+        );
+        assert_eq!(
+            session.update(false, now + Duration::from_millis(90)),
+            "hidden"
+        );
+        assert_eq!(session.pointer_inside, None);
+        assert!(reader_mounted(&session.name, "hidden"));
+        assert_eq!(
+            session.update(true, now + Duration::from_millis(200)),
+            "hidden"
+        );
+        assert_eq!(
+            session.update(true, now + Duration::from_millis(350)),
+            "reading"
+        );
+    }
+    #[test]
+    fn stationary_reader_stays_visible_after_hint_expiry_and_hides_on_global_exit() {
+        let mut session = ReaderSession::new("hover");
+        let now = Instant::now();
+        session.set_pointer(true, now);
+        assert_eq!(
+            session.update(true, now + Duration::from_secs(60)),
+            "reading"
+        );
+        assert_eq!(session.pointer_inside, None);
+        assert_eq!(
+            session.update(false, now + Duration::from_secs(61)),
+            "hidden"
+        );
+        session.reset("ready", Some(true));
+        assert_eq!(
+            session.update(false, now + Duration::from_secs(120)),
+            "ready"
         );
     }
     #[test]
@@ -820,12 +963,12 @@ mod tests {
     #[test]
     fn first_pointer_exit_keeps_native_reader_mounted_and_session_in_hover() {
         let mut session = ReaderSession::new("hover");
-        session.pointer_inside = Some(true);
+        session.set_pointer(true, Instant::now());
         let now = Instant::now();
         let visible = session.update(false, now);
         assert_eq!(visible, "reading");
         assert!(reader_mounted(&session.name, visible));
-        session.pointer_inside = Some(false);
+        session.set_pointer(false, Instant::now());
         let hidden = session.update(false, now);
         assert_eq!(hidden, "hidden");
         assert!(reader_mounted(&session.name, hidden));
