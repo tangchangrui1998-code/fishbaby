@@ -1,6 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod diagnostics;
 mod epub;
+#[cfg(target_os = "macos")]
+mod macos_geometry;
 mod publication;
 mod text;
 #[cfg(windows)]
@@ -91,6 +93,8 @@ struct Store {
     file: PathBuf,
     mode: Mutex<ReaderSession>,
     presentation: Mutex<ReaderView>,
+    #[cfg(target_os = "macos")]
+    geometry_generation: std::sync::atomic::AtomicU64,
 }
 #[derive(Clone, Serialize)]
 struct ReaderView {
@@ -397,14 +401,17 @@ fn save_settings(
     settings.background = settings.background.clamp(0., 1.);
     let resize = resize.unwrap_or(false);
     let reader = app.get_webview_window("reader");
+    #[cfg(not(target_os = "macos"))]
     let live_size = reader.as_ref().and_then(|w| {
         let size = w.inner_size().ok()?;
         let scale = w.scale_factor().ok()?;
         Some((size.width as f64 / scale, size.height as f64 / scale))
     });
-    preserve_reader_size(&mut settings, resize, live_size);
     let store = app.state::<Store>();
     let mut data = store.library.lock().unwrap();
+    #[cfg(target_os = "macos")]
+    let live_size = Some((data.settings.width, data.settings.height));
+    preserve_reader_size(&mut settings, resize, live_size);
     settings.x = data.settings.x;
     settings.y = data.settings.y;
     data.settings = settings.clone();
@@ -636,6 +643,8 @@ fn main() {
                 file,
                 mode: Mutex::new(ReaderSession::new("paused")),
                 presentation: Mutex::new(ReaderView::default()),
+                #[cfg(target_os = "macos")]
+                geometry_generation: std::sync::atomic::AtomicU64::new(u64::MAX),
             });
             // Windows starts one WebView only. The reader is created by async read_book.
             if app.get_webview_window("reader").is_some() {
@@ -698,6 +707,8 @@ fn main() {
             startup_log("shortcuts-ready");
             let handle = app.handle().clone();
             std::thread::spawn(move || {
+                #[cfg(target_os = "macos")]
+                let mut geometry = macos_geometry::Protection::new();
                 let mut previous: Option<(String, bool, u64)> = None;
                 let mut last_snapshot = Instant::now() - Duration::from_secs(5);
                 let mut last_poll = Instant::now();
@@ -707,6 +718,15 @@ fn main() {
                     let Some(w) = handle.get_webview_window("reader") else {
                         continue;
                     };
+                    #[cfg(target_os = "macos")]
+                    match geometry.reconcile(&w, &store) {
+                        Ok(true) => {},
+                        Ok(false) => continue,
+                        Err(error) => {
+                            diagnostics::record("geometry-error", serde_json::json!({ "error": error.to_string() }));
+                            continue;
+                        }
+                    }
                     let window_scale = w.scale_factor().unwrap_or(1.);
                     #[cfg(target_os = "macos")]
                     let cursor_scale = handle
@@ -834,6 +854,10 @@ fn main() {
                 }
             }
             if w.label() == "reader" {
+                #[cfg(target_os = "macos")]
+                macos_geometry::on_event(w, event);
+                #[cfg(not(target_os = "macos"))]
+                {
                 let geometry = match event {
                     tauri::WindowEvent::Moved(p) => Some((Some(*p), None)),
                     tauri::WindowEvent::Resized(size) if size.width > 0 && size.height > 0 => {
@@ -860,6 +884,7 @@ fn main() {
                             changed(w.app_handle());
                         }
                     });
+                }
                 }
             }
         })
