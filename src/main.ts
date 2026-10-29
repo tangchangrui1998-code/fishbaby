@@ -241,6 +241,17 @@ function applyReaderView(view: ReaderView) {
   document.querySelector("#start")!.textContent =
     view.state === "reading" ? "暂停阅读" : "开始阅读";
   paginate();
+  reportReaderView();
+}
+function reportReaderView() {
+  const overlay = document.querySelector("#overlay")!;
+  void invoke("reader_report", {
+    revision: readerRevision,
+    state: overlay.className,
+    hovered: overlay.matches(":hover"),
+    visible: document.visibilityState === "visible",
+    contentVisible: getComputedStyle(overlay).visibility === "visible",
+  }).catch(console.warn);
 }
 let text = "";
 let book: Book | null = null;
@@ -499,6 +510,22 @@ async function boot() {
     // The first native event can precede lazy WebView initialization on Windows.
     // Hydrate after installing listeners; revisions reject late/stale responses.
     applyReaderView(await invoke<ReaderView>("reader_state"));
+    // Recover a missed native event; heartbeat records the state actually applied
+    // by the WebView, independently of the desktop-side state machine.
+    let checking = false;
+    let heartbeat = 0;
+    setInterval(async () => {
+      if (checking) return;
+      checking = true;
+      try {
+        applyReaderView(await invoke<ReaderView>("reader_state"));
+        if (++heartbeat % 5 === 0) reportReaderView();
+      } catch (error) {
+        console.warn("reader-state-sync", error);
+      } finally {
+        checking = false;
+      }
+    }, 1000);
   } else renderShelf();
   await listen("library-changed", () => void refresh());
   await invoke("frontend_ready");

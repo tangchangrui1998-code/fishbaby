@@ -29,6 +29,14 @@ npm run desktop
 
 macOS 的书架和设置保存在 `~/Library/Application Support/com.fishbaby.reader/library.json`，Windows 保存在系统应用数据目录下的 `com.fishbaby.reader/library.json`；原始书籍保留在导入位置，应用不会上传内容或修改原文件。单文件上限 50 MB，EPUB 解压读取的正文及目录合计上限 50 MB。
 
+## 悬停异常诊断
+
+0.1.6 起自动写入本地诊断日志，无需手动开启。macOS 路径为 `~/Library/Logs/com.fishbaby.reader/reader.jsonl`；Windows 为 `%LOCALAPPDATA%\com.fishbaby.reader\logs\reader.jsonl`。日志记录版本、时间、鼠标进出、系统坐标和窗口区域、模式切换、页面实际显示状态及窗口操作错误，不记录书名、书籍路径或正文，也不上传。每个文件最多约 2 MB，保留当前文件及最近 3 份轮转文件，重启后继续保留。
+
+如果再次出现“移出后未隐藏”，记下发生时间（尽量精确到分钟），以及是否连接外接显示器、刚移动/缩放过阅读区；这些信息可用于对照本地日志。可通过 Finder 的“前往文件夹”输入 `~/Library/Logs/com.fishbaby.reader/` 查看。旧版本没有这份日志，需要先安装 0.1.6 或更新版本。
+
+显示状态同时由桌面鼠标位置兜底：页面报告的“鼠标在区域内”仅短期有效，遗漏移出事件也会重新使用系统坐标；页面每秒核对一次最新窗口状态，恢复偶发丢失的状态事件。
+
 ## 检查与构建
 
 ```sh

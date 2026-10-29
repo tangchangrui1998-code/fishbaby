@@ -33,6 +33,7 @@
       <button id="fixture-reopen">重新载入书籍</button>
       <button id="fixture-reset">重置测试进度</button>
       <button id="fixture-stale">模拟过期窗口状态</button>
+      <button id="fixture-missed">模拟丢失隐藏事件</button>
       <output id="fixture-saved">尚未保存</output>
     </div>
     <script type="module">
@@ -141,6 +142,11 @@
       };
       document.querySelector("#fixture-stale").onclick = () =>
         emit("reader-state", { state: "hidden", revision: 0 });
+      document.querySelector("#fixture-missed").onclick = () => {
+        view.state = "hidden";
+        view.revision++;
+        // Do not emit: the periodic reader_state query must recover the change.
+      };
       // Deliberately publish before the app installs listeners, as in a lazy Windows WebView.
       await emit("reader-state", structuredClone(view));
       await import("/src/main.ts");
