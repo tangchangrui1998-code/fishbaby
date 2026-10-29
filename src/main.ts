@@ -228,6 +228,20 @@ function renderShelf() {
   renderBooks();
 }
 let readerState = "hidden";
+let readerRevision = -1;
+interface ReaderView {
+  state: string;
+  revision: number;
+}
+function applyReaderView(view: ReaderView) {
+  if (view.revision <= readerRevision) return;
+  readerRevision = view.revision;
+  readerState = view.state;
+  document.querySelector("#overlay")!.className = view.state;
+  document.querySelector("#start")!.textContent =
+    view.state === "reading" ? "暂停阅读" : "开始阅读";
+  paginate();
+}
 let text = "";
 let book: Book | null = null;
 let pages: PageReader | null = null;
@@ -399,6 +413,28 @@ function renderReader() {
   document
     .querySelector("#next-page")!
     .addEventListener("click", () => void action(() => turn(1)));
+  document
+    .querySelector(".reader-content")!
+    .addEventListener("click", (event) => {
+      const click = event as MouseEvent;
+      if (
+        readerState === "hidden" ||
+        click.button !== 0 ||
+        click.detail > 1 ||
+        click.ctrlKey ||
+        click.metaKey ||
+        click.altKey ||
+        click.shiftKey
+      )
+        return;
+      if (getSelection()?.toString()) return;
+      const bounds = document
+        .querySelector(".reader-content")!
+        .getBoundingClientRect();
+      void action(() =>
+        turn(click.clientX < bounds.left + bounds.width / 2 ? -1 : 1),
+      );
+    });
   document.addEventListener("keydown", (event) => {
     if (
       readerState === "hidden" ||
@@ -457,16 +493,12 @@ async function boot() {
   if (reader) renderReader();
   data = await invoke<Library>("library");
   if (reader) {
-    await listen<string>("reader-state", (e) => {
-      const el = document.querySelector("#overlay")!;
-      el.className = e.payload;
-      readerState = e.payload;
-      document.querySelector("#start")!.textContent =
-        e.payload === "reading" ? "暂停阅读" : "开始阅读";
-      paginate();
-    });
+    await listen<ReaderView>("reader-state", (e) => applyReaderView(e.payload));
     await listen("book-changed", loadCurrent);
     await loadCurrent();
+    // The first native event can precede lazy WebView initialization on Windows.
+    // Hydrate after installing listeners; revisions reject late/stale responses.
+    applyReaderView(await invoke<ReaderView>("reader_state"));
   } else renderShelf();
   await listen("library-changed", () => void refresh());
 }
