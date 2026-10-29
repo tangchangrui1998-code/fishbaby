@@ -32,6 +32,7 @@
       <button id="fixture-wheel">切换滚轮设备</button>
       <button id="fixture-reopen">重新载入书籍</button>
       <button id="fixture-reset">重置测试进度</button>
+      <button id="fixture-stale">模拟过期窗口状态</button>
       <output id="fixture-saved">尚未保存</output>
     </div>
     <script type="module">
@@ -70,9 +71,16 @@
           y: null,
         },
       };
+      const view = { state: "ready", revision: 1 };
+      async function emitView(state) {
+        view.state = state;
+        view.revision++;
+        await emit("reader-state", structuredClone(view));
+      }
       mockIPC(
         async (cmd, args) => {
           if (cmd === "library") return structuredClone(data);
+          if (cmd === "reader_state") return structuredClone(view);
           if (cmd === "current_text") return [structuredClone(book), text];
           if (cmd === "save_progress") {
             book.offset = args.offset;
@@ -91,11 +99,11 @@
             return;
           }
           if (cmd === "start_reading") {
-            await emit("reader-state", "reading");
+            await emitView("reading");
             return;
           }
           if (cmd === "set_mode") {
-            await emit("reader-state", args.mode);
+            await emitView(args.mode);
             return;
           }
         },
@@ -131,9 +139,11 @@
         sessionStorage.removeItem("reader-fixture-offset");
         return emit("book-changed", book.id);
       };
+      document.querySelector("#fixture-stale").onclick = () =>
+        emit("reader-state", { state: "hidden", revision: 0 });
+      // Deliberately publish before the app installs listeners, as in a lazy Windows WebView.
+      await emit("reader-state", structuredClone(view));
       await import("/src/main.ts");
-      await new Promise((r) => setTimeout(r, 100));
-      await emit("reader-state", "ready");
     </script>
   </body>
 </html>

@@ -87,6 +87,31 @@ struct Store {
     library: Mutex<Library>,
     file: PathBuf,
     mode: Mutex<ReaderSession>,
+    presentation: Mutex<ReaderView>,
+}
+#[derive(Clone, Serialize)]
+struct ReaderView {
+    state: String,
+    revision: u64,
+}
+impl Default for ReaderView {
+    fn default() -> Self {
+        Self {
+            state: "hidden".into(),
+            revision: 0,
+        }
+    }
+}
+impl ReaderView {
+    fn publish(&mut self, state: &str) -> Self {
+        self.state = state.into();
+        self.revision += 1;
+        self.clone()
+    }
+}
+#[tauri::command]
+fn reader_state(app: tauri::AppHandle) -> ReaderView {
+    app.state::<Store>().presentation.lock().unwrap().clone()
 }
 static STARTUP_LOG: OnceLock<PathBuf> = OnceLock::new();
 fn startup_log(message: &str) {
@@ -310,7 +335,7 @@ fn remove_book(app: tauri::AppHandle, id: String) -> Result<(), String> {
     data.books.retain(|b| b.id != id);
     if data.active_id.as_ref() == Some(&id) {
         data.active_id = None;
-        *store.mode.lock().unwrap() = ReaderSession::new("paused");
+        store.mode.lock().unwrap().reset("paused", None);
         let _ = app.emit("book-changed", "");
     }
     persist(&store, &data)?;
@@ -396,9 +421,7 @@ fn change_mode(
             }
         }
     }
-    let mut session = ReaderSession::new(&mode);
-    session.pointer_inside = pointer_inside;
-    *store.mode.lock().unwrap() = session;
+    store.mode.lock().unwrap().reset(&mode, pointer_inside);
     Ok(())
 }
 #[tauri::command]
@@ -407,7 +430,11 @@ fn reset_position(app: tauri::AppHandle) -> Result<(), String> {
     w.center().map_err(|e| e.to_string())
 }
 fn open_shelf(app: &tauri::AppHandle) {
-    *app.state::<Store>().mode.lock().unwrap() = ReaderSession::new("paused");
+    app.state::<Store>()
+        .mode
+        .lock()
+        .unwrap()
+        .reset("paused", None);
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.unminimize();
         let _ = w.show();
@@ -439,11 +466,13 @@ struct ReaderSession {
     name: String,
     entered_at: Option<Instant>,
     pointer_inside: Option<bool>,
+    generation: u64,
 }
 impl ReaderSession {
     fn new(name: &str) -> Self {
         Self {
             name: name.into(),
+            generation: 0,
             pointer_inside: None,
             // Starting from the reader button should not flash hidden for 150 ms.
             entered_at: (name == "hover").then(|| Instant::now() - Duration::from_millis(150)),
@@ -451,6 +480,20 @@ impl ReaderSession {
     }
     fn reopen_shelf_on_activation(&self) -> bool {
         self.name == "paused"
+    }
+    fn reset(&mut self, name: &str, pointer_inside: Option<bool>) {
+        let generation = self.generation + 1;
+        *self = Self::new(name);
+        self.generation = generation;
+        self.pointer_inside = pointer_inside;
+    }
+    fn update_exposure(&mut self, inside: bool, uncovered: bool, now: Instant) -> &'static str {
+        if self.name == "hover" && !uncovered {
+            self.pointer_inside = None;
+            self.entered_at = None;
+            return "hidden";
+        }
+        self.update(inside, now)
     }
     fn update(&mut self, global_inside: bool, now: Instant) -> &'static str {
         let inside = self.pointer_inside.unwrap_or(global_inside);
@@ -507,6 +550,7 @@ fn main() {
             set_mode,
             start_reading,
             reader_pointer,
+            reader_state,
             reset_position,
             return_to_shelf
         ])
@@ -524,6 +568,7 @@ fn main() {
                 library: Mutex::new(data),
                 file,
                 mode: Mutex::new(ReaderSession::new("paused")),
+                presentation: Mutex::new(ReaderView::default()),
             });
             // Windows starts one WebView only. The reader is created by async read_book.
             if app.get_webview_window("reader").is_some() {
@@ -586,7 +631,7 @@ fn main() {
             startup_log("shortcuts-ready");
             let handle = app.handle().clone();
             std::thread::spawn(move || {
-                let mut previous = (String::new(), false);
+                let mut previous: Option<(String, bool, u64)> = None;
                 loop {
                     std::thread::sleep(Duration::from_millis(30));
                     let store = handle.state::<Store>();
@@ -616,12 +661,17 @@ fn main() {
                     } else {
                         false
                     };
-                    let (state, mounted) = {
+                    let (state, mounted, generation) = {
                         let mut session = store.mode.lock().unwrap();
-                        let state = session.update(inside, Instant::now());
-                        (state, reader_mounted(&session.name, state))
+                        let state = session.update_exposure(inside, true, Instant::now());
+                        (
+                            state,
+                            reader_mounted(&session.name, state),
+                            session.generation,
+                        )
                     };
-                    if previous != (state.into(), mounted) {
+                    let next = (state.into(), mounted, generation);
+                    if previous.as_ref() != Some(&next) {
                         let _ = w.set_focusable(state == "setup" || state == "ready");
                         let _ = w.set_ignore_cursor_events(state == "hidden");
                         // Hover hiding changes WebView visibility and hit testing only.
@@ -633,8 +683,9 @@ fn main() {
                         } else {
                             let _ = w.hide();
                         }
-                        let _ = w.emit("reader-state", state);
-                        previous = (state.into(), mounted);
+                        let view = store.presentation.lock().unwrap().publish(state);
+                        let _ = w.emit("reader-state", view);
+                        previous = Some(next);
                     }
                 }
             });
@@ -701,6 +752,34 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn late_frontend_can_hydrate_current_state_and_repeated_requests_keep_advancing() {
+        let mut view = ReaderView::default();
+        let ready = view.publish("ready");
+        assert_eq!(ready.state, "ready");
+        assert_eq!(view.clone().revision, ready.revision);
+        let mut session = ReaderSession::new("ready");
+        session.reset("ready", None);
+        assert_eq!(session.generation, 1);
+        session.reset("ready", None);
+        assert_eq!(session.generation, 2);
+        let second = view.publish("ready");
+        assert!(second.revision > ready.revision);
+    }
+    #[test]
+    fn covering_reader_clears_stale_pointer_hint_and_requires_fresh_hover() {
+        let mut session = ReaderSession::new("hover");
+        session.pointer_inside = Some(true);
+        let now = Instant::now();
+        assert_eq!(session.update_exposure(true, true, now), "reading");
+        assert_eq!(session.update_exposure(true, false, now), "hidden");
+        assert_eq!(session.pointer_inside, None);
+        assert_eq!(session.update_exposure(true, true, now), "hidden");
+        assert_eq!(
+            session.update_exposure(true, true, now + Duration::from_millis(150)),
+            "reading"
+        );
+    }
     #[test]
     fn selecting_book_stays_visible_until_explicit_start() {
         let start = Instant::now();
