@@ -2,6 +2,7 @@ param([int]$AppProcessId, [string]$LogPath, [string]$LibraryPath, [string]$Diagn
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
+Add-Type -AssemblyName System.Windows.Forms
 Add-Type @'
 using System;
 using System.Runtime.InteropServices;
@@ -32,6 +33,7 @@ public static class ReaderCheckNative {
 function Wait-For([scriptblock]$Check, [string]$Message) {
   $deadline = (Get-Date).AddSeconds(25)
   while ((Get-Date) -lt $deadline) {
+    [System.Windows.Forms.Application]::DoEvents()
     try {
       $result = & $Check
       if ($result) { return $result }
@@ -88,10 +90,12 @@ try {
   Write-Output 'Reader left/right content clicks saved and restored the original position.'
   $cover = [ReaderCheckNative]::CreateWindowEx(0, 'STATIC', 'fishbaby smoke cover', [uint32]2147483648, [int]$bounds.X, [int]$bounds.Y, [int]$bounds.Width, [int]$bounds.Height, [IntPtr]::Zero, [IntPtr]::Zero, [IntPtr]::Zero, [IntPtr]::Zero)
   if ($cover -eq [IntPtr]::Zero) { throw 'Could not create covering test window' }
-  [ReaderCheckNative]::SetWindowPos($cover, [IntPtr]::Zero, [int]$bounds.X, [int]$bounds.Y, [int]$bounds.Width, [int]$bounds.Height, 0x50) | Out-Null
+  if (![ReaderCheckNative]::SetWindowPos($cover, [IntPtr]::Zero, [int]$bounds.X, [int]$bounds.Y, [int]$bounds.Width, [int]$bounds.Height, 0x50)) { throw 'Could not position covering test window' }
+  if (![ReaderCheckNative]::IsWindowVisible($cover) -or ![ReaderCheckNative]::Above($cover, $readerHandle)) { throw 'Covering test window is not above the reader' }
   Wait-State 'hidden'
   [ReaderCheckNative]::SetCursorPos([int]($bounds.X + $bounds.Width/2), $bodyY) | Out-Null
   Start-Sleep -Milliseconds 400
+  [System.Windows.Forms.Application]::DoEvents()
   if (![ReaderCheckNative]::Above($cover, $readerHandle)) { throw 'Hover raised the reader above the covering window' }
   Wait-State 'hidden'
   Write-Output 'A later normal window covered the reader; mouse movement did not reveal or raise it.'

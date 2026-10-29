@@ -178,6 +178,9 @@ fn configure_reader(app: &tauri::AppHandle) -> tauri::Result<()> {
     } else {
         w.center()?;
     }
+    #[cfg(windows)]
+    windows_visibility::set_passthrough(w.hwnd()?.0, true)?;
+    #[cfg(not(windows))]
     w.set_ignore_cursor_events(true)?;
     Ok(())
 }
@@ -691,7 +694,6 @@ fn main() {
                         // explicit preview/setup requests may bring the window forward.
                         let _ =
                             w.set_focusable(cfg!(windows) || state == "setup" || state == "ready");
-                        let _ = w.set_ignore_cursor_events(state == "hidden");
                         // Hover hiding changes WebView visibility and hit testing only.
                         // Hiding the active NSWindow can restore the minimized main window.
                         if mounted {
@@ -701,6 +703,17 @@ fn main() {
                         } else {
                             let _ = w.hide();
                         }
+                        // Apply after show/hide, which can restore the library's styles.
+                        #[cfg(windows)]
+                        if let Err(error) = w.hwnd().map_err(|e| e.to_string()).and_then(|hwnd| {
+                            windows_visibility::set_passthrough(hwnd.0, state == "hidden")
+                                .map_err(|e| e.to_string())
+                        }) {
+                            startup_log(&format!("reader-hit-test-error {error}"));
+                            continue;
+                        }
+                        #[cfg(not(windows))]
+                        let _ = w.set_ignore_cursor_events(state == "hidden");
                         #[cfg(windows)]
                         if matches!(state, "ready" | "setup")
                             && previous.as_ref().is_none_or(|p| p.2 != generation)

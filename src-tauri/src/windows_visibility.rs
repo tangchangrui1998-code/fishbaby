@@ -1,12 +1,53 @@
 use std::collections::HashSet;
 use windows_sys::Win32::{
-    Foundation::{HWND, RECT},
+    Foundation::{GetLastError, SetLastError, HWND, RECT},
     Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED},
     UI::WindowsAndMessaging::{
-        GetWindow, GetWindowLongW, GetWindowRect, IsIconic, IsWindow, IsWindowVisible, GWL_EXSTYLE,
-        GW_HWNDPREV, WS_EX_TRANSPARENT,
+        GetWindow, GetWindowLongW, GetWindowRect, IsIconic, IsWindow, IsWindowVisible,
+        SetWindowLongW, SetWindowPos, GWL_EXSTYLE, GW_HWNDPREV, SWP_ASYNCWINDOWPOS,
+        SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WS_EX_LAYERED,
+        WS_EX_TRANSPARENT,
     },
 };
+
+// Tao's generic style update calls ShowWindow(SW_SHOW), even when only changing
+// hit testing. That can activate/raise an ordinary reader. Do not use that path.
+pub(super) fn set_passthrough(reader: HWND, ignore: bool) -> std::io::Result<()> {
+    unsafe {
+        let current = GetWindowLongW(reader, GWL_EXSTYLE) as u32;
+        let mask = WS_EX_TRANSPARENT | WS_EX_LAYERED;
+        let desired = if ignore {
+            current | mask
+        } else {
+            current & !mask
+        };
+        if current == desired {
+            return Ok(());
+        }
+        SetLastError(0);
+        if SetWindowLongW(reader, GWL_EXSTYLE, desired as i32) == 0 && GetLastError() != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        if SetWindowPos(
+            reader,
+            std::ptr::null_mut(),
+            0,
+            0,
+            0,
+            0,
+            SWP_ASYNCWINDOWPOS
+                | SWP_FRAMECHANGED
+                | SWP_NOACTIVATE
+                | SWP_NOMOVE
+                | SWP_NOSIZE
+                | SWP_NOZORDER,
+        ) == 0
+        {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(())
+    }
+}
 
 // A transparent reader is skipped by normal hit testing. Inspect only windows
 // ABOVE it, so the application underneath cannot prevent an exposed reader waking.
@@ -120,6 +161,18 @@ mod tests {
         );
         other.place(HWND_TOP, 100, 100);
         assert!(!can_reveal(reader.0, (150, 150)));
+        set_passthrough(reader.0, true).unwrap();
+        assert!(!can_reveal(reader.0, (150, 150)));
+        assert_ne!(
+            unsafe { GetWindowLongW(reader.0, GWL_EXSTYLE) } as u32 & WS_EX_TRANSPARENT,
+            0
+        );
+        set_passthrough(reader.0, false).unwrap();
+        assert!(!can_reveal(reader.0, (150, 150)));
+        assert_eq!(
+            unsafe { GetWindowLongW(reader.0, GWL_EXSTYLE) } as u32 & WS_EX_TRANSPARENT,
+            0
+        );
         other.place(HWND_TOP, 400, 400);
         assert!(can_reveal(reader.0, (150, 150)));
         other.place(HWND_TOP, 100, 100);
