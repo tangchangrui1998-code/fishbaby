@@ -3,6 +3,8 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import { boundary, PageReader, WheelPager } from "./reader";
+import { readerTools } from "./tools-ui";
+import { shelfExtras } from "./settings-ui";
 import "./style.css";
 interface Book {
   id: string;
@@ -64,11 +66,16 @@ const esc = (s: string) =>
         c
       ]!,
   );
+let noticeTimer: ReturnType<typeof setTimeout> | undefined;
 function toast(message: unknown) {
   const el = document.querySelector<HTMLElement>("#notice");
   if (el) {
     el.textContent = String(message);
     el.hidden = false;
+    clearTimeout(noticeTimer);
+    noticeTimer = setTimeout(() => {
+      el.hidden = true;
+    }, 6500);
   }
 }
 async function action(fn: () => Promise<unknown>) {
@@ -78,12 +85,16 @@ async function action(fn: () => Promise<unknown>) {
     toast(e);
   }
 }
+let extras: ReturnType<typeof shelfExtras> | undefined;
+let tools: ReturnType<typeof readerTools> | undefined;
+let resumeTimer: ReturnType<typeof setTimeout> | undefined;
 async function refresh() {
   data = await invoke<Library>("library");
   if (reader) {
     styleReader();
   } else {
     renderBooks();
+    void extras?.refresh().catch(toast);
     for (const id of ["width", "height"] as const)
       (document.getElementById(id) as HTMLInputElement).value = String(
         data.settings[id],
@@ -131,7 +142,7 @@ function renderBooks() {
         action(async () => {
           if (
             confirm(
-              "移出后会清除这本书的阅读进度，原始文件会保留。确定移出吗？",
+              "移出后会清除这本书的阅读进度和书签，原始文件会保留。确定移出吗？",
             )
           )
             await invoke("remove_book", { id: b.dataset.remove });
@@ -156,14 +167,17 @@ async function importBooks() {
 }
 function renderShelf() {
   root.innerHTML = `<aside><div class="brand">隐阅<span>fishbaby</span></div><nav aria-label="主导航"><button class="selected" data-view="library" aria-current="page">书架</button><button data-view="preferences">阅读设置</button></nav><div class="side-bottom"><p>快捷键</p><dl><dt>暂停 / 继续</dt><dd>${shortcutModifier} ⇧ H</dd><dt>打开书架</dt><dd>${shortcutModifier} ⇧ O</dd></dl></div></aside><main><section id="library-view"><header><div class="heading"><h1>书架</h1><span id="count"></span></div><button id="import" class="primary">导入书籍</button></header><div class="toolbar"><span>最近阅读</span><div><button id="adjust">调整阅读区</button><button id="pause">暂停阅读</button></div></div><section id="books" aria-label="书籍"></section></section><section id="preferences-view" hidden><header><h1>阅读设置</h1></header><div class="fields"><section class="setting-group"><h2>外观</h2><label>主题<select id="theme"><option value="light" ${data.settings.theme === "light" ? "selected" : ""}>浅色</option><option value="dark" ${data.settings.theme === "dark" ? "selected" : ""}>深色</option></select></label><label>文字颜色<input id="color" type="color" value="${data.settings.color}"></label><label>背景不透明度<input id="background" type="range" min="0" max="1" step="0.05" value="${data.settings.background}"></label></section><section class="setting-group"><h2>排版</h2><label>字号<span><output id="fontSize-value">${data.settings.fontSize}</output><input id="fontSize" type="range" min="12" max="40" value="${data.settings.fontSize}"></span></label><label>行距<span><output id="lineHeight-value">${data.settings.lineHeight}</output><input id="lineHeight" type="range" min="1.2" max="2.5" step="0.1" value="${data.settings.lineHeight}"></span></label><label>滚轮设备<select id="wheelMode"><option value="mouse" ${data.settings.wheelMode !== "trackpad" ? "selected" : ""}>鼠标滚轮</option><option value="trackpad" ${data.settings.wheelMode === "trackpad" ? "selected" : ""}>触控板</option></select></label><label>单行阅读<input id="singleLine" type="checkbox" ${data.settings.singleLine ? "checked" : ""}></label></section><section class="setting-group"><h2>阅读窗口</h2><label>宽度<span><input id="width" type="number" min="220" max="1400" value="${data.settings.width}"> px</span></label><label>高度<span><input id="height" type="number" min="90" max="800" value="${data.settings.height}"> px</span></label><div class="setting-action"><span>拖动窗口顶部可调整位置</span><button id="reset">恢复居中</button></div></section></div></section><p id="notice" role="status" hidden></p></main>`;
+  extras = shelfExtras(toast);
+  void extras.refresh().catch(toast);
   document.querySelectorAll<HTMLButtonElement>("[data-view]").forEach(
     (button) =>
       (button.onclick = () => {
-        const library = button.dataset.view === "library";
-        (document.querySelector("#library-view") as HTMLElement).hidden =
-          !library;
-        (document.querySelector("#preferences-view") as HTMLElement).hidden =
-          library;
+        for (const view of ["library", "preferences", "about"]) {
+          (document.querySelector(`#${view}-view`) as HTMLElement).hidden =
+            view !== button.dataset.view;
+        }
+        if (button.dataset.view === "about")
+          void extras?.refresh().catch(toast);
         document.querySelectorAll("[data-view]").forEach((item) => {
           item.classList.toggle("selected", item === button);
           if (item === button) item.setAttribute("aria-current", "page");
@@ -192,6 +206,7 @@ function renderShelf() {
     .addEventListener("click", () => action(() => invoke("reset_position")));
   document.querySelector(".fields")!.addEventListener("change", (event) =>
     action(async () => {
+      if ((event.target as HTMLElement).closest("#shortcut-settings")) return;
       const settings = { ...data.settings };
       for (const id of [
         "fontSize",
@@ -235,13 +250,25 @@ interface ReaderView {
 }
 function applyReaderView(view: ReaderView) {
   if (view.revision <= readerRevision) return;
+  const resumed = readerState === "hidden" && view.state === "reading";
   readerRevision = view.revision;
   readerState = view.state;
   document.querySelector("#overlay")!.className = view.state;
   document.querySelector("#start")!.textContent =
     view.state === "reading" ? "暂停阅读" : "开始阅读";
   paginate();
+  if (resumed) showResumeHint();
+  if (view.state === "hidden") clearResumeHint();
   reportReaderView();
+}
+function clearResumeHint() {
+  clearTimeout(resumeTimer);
+  document.querySelector("#text")?.classList.remove("resume-hint");
+}
+function showResumeHint() {
+  clearResumeHint();
+  document.querySelector("#text")?.classList.add("resume-hint");
+  resumeTimer = setTimeout(clearResumeHint, 1000);
 }
 function reportReaderView() {
   const overlay = document.querySelector("#overlay")!;
@@ -338,6 +365,7 @@ function paginate() {
   el.scrollLeft = 0;
   document.querySelector("#position")!.textContent = book.title;
   syncPageControls();
+  tools?.update();
 }
 async function loadCurrent() {
   try {
@@ -345,6 +373,7 @@ async function loadCurrent() {
     [book, text] = await invoke<[Book, string]>("current_text");
     pages = new PageReader(text, book.offset);
     styleReader();
+    await tools?.reset().catch(toast);
   } catch {
     book = null;
     pages = null;
@@ -358,7 +387,8 @@ async function turn(direction: number) {
   // Finish a pending reflow before using any cached page boundary.
   clearTimeout(resizeTimer);
   paginate();
-  if (!pages || !book || !layoutReady) return;
+  if (!pages || !book || !layoutReady || tools?.isOpen) return;
+  clearResumeHint();
   if (!pages.turn(direction, layoutKey, fitsText)) return;
   paginate();
   await persistPosition();
@@ -371,11 +401,30 @@ async function jump(last: boolean) {
   paginate();
   await persistPosition();
 }
+async function goToOffset(offset: number) {
+  if (!book) return;
+  clearTimeout(resizeTimer);
+  clearResumeHint();
+  pages = new PageReader(text, offset);
+  paginate();
+  await persistPosition();
+  showResumeHint();
+}
 function renderReader() {
   document.documentElement.classList.add("reader-root");
   document.body.classList.add("reader");
   root.innerHTML =
-    '<section id="overlay" class="hidden" tabindex="0" aria-label="阅读窗口"><div class="drag"><span id="position"></span><button id="theme-toggle" aria-label="切换主题">深色</button><button id="start">开始阅读</button><button id="back">返回书架</button></div><div class="reader-content"><div id="text"></div><span id="layout-hint" hidden>请调高窗口以显示完整文字</span></div><nav class="page-controls" aria-label="翻页"><button id="previous-page" aria-controls="text" title="上一页（← / Page Up）" disabled>上一页</button><output id="page-progress" aria-label="阅读进度" aria-live="polite">—</output><button id="next-page" aria-controls="text" title="下一页（→ / 空格 / Page Down）" disabled>下一页</button></nav><p id="notice" hidden></p></section>';
+    '<section id="overlay" class="hidden" tabindex="0" aria-label="阅读窗口"><div class="drag"><span id="position"></span><button id="reader-menu" aria-label="打开阅读工具">工具</button><button id="theme-toggle" aria-label="切换主题">深色</button><button id="start">开始阅读</button><button id="back">返回书架</button></div><div class="reader-content"><div id="text"></div><span id="layout-hint" hidden>请调高窗口以显示完整文字</span></div><nav class="page-controls" aria-label="翻页"><button id="previous-page" aria-controls="text" title="上一页（← / Page Up）" disabled>上一页</button><span id="chapter-position" aria-label="当前章节"></span><output id="page-progress" aria-label="阅读进度" aria-live="polite">—</output><button id="next-page" aria-controls="text" title="下一页（→ / 空格 / Page Down）" disabled>下一页</button></nav><p id="notice" role="status" hidden></p></section>';
+  tools = readerTools({
+    book: () => book,
+    text: () => text,
+    offset: () => book?.offset ?? 0,
+    go: goToOffset,
+    notify: toast,
+  });
+  document
+    .querySelector("#reader-menu")!
+    .addEventListener("click", () => void tools!.open().catch(toast));
   document.querySelector("#theme-toggle")!.addEventListener("click", () =>
     action(async () => {
       const latest = await invoke<Library>("library");
@@ -415,7 +464,9 @@ function renderReader() {
     void action(() => invoke("reader_pointer", { inside: false }));
   });
   overlay.addEventListener("pointerdown", (event) => {
-    if (!(event.target as HTMLElement).closest("button"))
+    if (
+      !(event.target as HTMLElement).closest("button, input, textarea, select")
+    )
       (overlay as HTMLElement).focus({ preventScroll: true });
   });
   document
@@ -447,6 +498,21 @@ function renderReader() {
       );
     });
   document.addEventListener("keydown", (event) => {
+    if (tools?.isOpen) return;
+    if (event.key === "Escape" && readerState !== "hidden") {
+      event.preventDefault();
+      void action(() => invoke("set_mode", { mode: "paused" }));
+      return;
+    }
+    if (
+      (event.ctrlKey || event.metaKey) &&
+      event.key.toLowerCase() === "f" &&
+      readerState !== "hidden"
+    ) {
+      event.preventDefault();
+      void tools?.open("search").catch(toast);
+      return;
+    }
     if (
       readerState === "hidden" ||
       event.ctrlKey ||
@@ -470,13 +536,20 @@ function renderReader() {
     else void action(() => jump(event.key === "End"));
   });
   document.querySelector(".drag")!.addEventListener("mousedown", (e) => {
-    if ((e.target as HTMLElement).closest("button")) return;
+    if ((e.target as HTMLElement).closest("button, input")) return;
     void getCurrentWindow().startDragging();
   });
   document.addEventListener(
     "wheel",
     (event) => {
-      if (readerState === "hidden" || event.ctrlKey || event.metaKey) return;
+      if ((event.target as HTMLElement).closest("#reader-tools")) return;
+      if (
+        readerState === "hidden" ||
+        tools?.isOpen ||
+        event.ctrlKey ||
+        event.metaKey
+      )
+        return;
       if (Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
       event.preventDefault();
       const direction = wheelPager.push(
@@ -505,6 +578,10 @@ async function boot() {
   data = await invoke<Library>("library");
   if (reader) {
     await listen<ReaderView>("reader-state", (e) => applyReaderView(e.payload));
+    await listen<string>("reader-action", (e) => {
+      if (!tools?.isOpen && readerState !== "hidden")
+        void action(() => turn(e.payload === "next" ? 1 : -1));
+    });
     await listen("book-changed", loadCurrent);
     await loadCurrent();
     // The first native event can precede lazy WebView initialization on Windows.

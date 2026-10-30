@@ -437,7 +437,8 @@ header .primary {
   height: 100%;
   display: flex;
   flex-direction: column;
-  padding: 7px 10px 9px 14px;
+  padding: 12px 24px 14px;
+  position: relative;
   overflow: hidden;
   border-radius: 6px;
   outline: none;
@@ -485,12 +486,15 @@ header .primary {
   flex: 1;
   min-height: 0;
   position: relative;
-  padding-top: 3px;
+  padding-top: 12px;
+  padding-bottom: 10px;
+  box-sizing: border-box;
 }
 .reader #text {
   flex: 1;
   min-width: 0;
-  height: 100%;
+  align-self: stretch;
+  min-height: 0;
   overflow: hidden;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -565,4 +569,163 @@ header .primary {
   .cover strong {
     font-size: 23px;
   }
+}
+
+.reader #chapter-position {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+.reader .page-controls {
+  gap: 4px;
+}
+.reader #text.resume-hint::first-line {
+  background: rgba(120, 150, 125, 0.18);
+}
+.reader #reader-tools {
+  position: absolute;
+  inset: 8px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  background: rgb(var(--reader-surface));
+  border: 1px solid var(--reader-chrome);
+  border-radius: 7px;
+  padding: 8px;
+  min-height: 0;
+  font-size: 12px;
+}
+.reader #reader-tools[hidden] {
+  display: none;
+}
+.reader .tool-bar,
+.reader .tool-bar nav,
+.reader #reader-tools form,
+.reader .bookmark-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.reader .tool-bar {
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+.reader #reader-tools button {
+  font-size: 11px;
+  padding: 5px 7px;
+  color: inherit;
+  background: transparent;
+}
+.reader #reader-tools button[aria-pressed="true"],
+.reader #reader-tools button[aria-current] {
+  background: rgba(110, 145, 118, 0.16);
+}
+.reader #tool-controls {
+  flex-shrink: 0;
+  padding-top: 7px;
+}
+.reader #reader-tools input {
+  min-width: 0;
+  flex: 1;
+  width: 80px;
+  padding: 5px 7px;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+}
+.reader #tool-results {
+  overflow: auto;
+  min-height: 0;
+  flex: 1;
+  margin-top: 5px;
+}
+.reader #reader-tools .result {
+  width: 100%;
+  display: block;
+  border: 0;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+}
+.reader .bookmark-row .result {
+  min-width: 0;
+  flex: 1;
+}
+.reader .result small {
+  margin-left: 8px;
+  opacity: 0.7;
+}
+.reader .tool-hint {
+  margin: 4px 0;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.reader #reader-tools mark {
+  color: inherit;
+  background: rgba(190, 160, 50, 0.3);
+}
+.setting-note {
+  color: #66736c;
+  font-size: 12px;
+  line-height: 1.7;
+}
+.settings-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+#shortcut-settings input {
+  width: 230px;
+  cursor: pointer;
+  font-size: 11px;
+}
+#app-info {
+  display: grid;
+  grid-template-columns: 90px 1fr;
+  gap: 10px;
+  font-size: 13px;
+}
+#app-info dd {
+  margin: 0;
+}
+#about-view .setting-group {
+  margin-bottom: 24px;
+}
+#log-directory {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 320px) {
+  .reader #overlay {
+    padding-left: 18px;
+    padding-right: 18px;
+  }
+  .reader .drag {
+    gap: 3px;
+  }
+  .reader .drag button {
+    padding: 3px;
+  }
+  .reader #chapter-position {
+    display: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .reader #text.resume-hint::first-line {
+    background: transparent;
+  }
+}
+
+.reader #notice {
+  z-index: 4;
+  background: rgb(var(--reader-surface));
+  color: inherit;
+  border: 1px solid currentColor;
+  border-radius: 5px;
+  padding: 6px 9px;
+  max-height: 65%;
+  overflow: auto;
 }

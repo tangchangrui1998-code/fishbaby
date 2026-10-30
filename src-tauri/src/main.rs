@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod diagnostics;
 mod epub;
+mod features;
 mod publication;
 #[cfg(any(target_os = "macos", windows))]
 mod reader_geometry;
@@ -14,7 +15,6 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tauri::{Emitter, Manager};
-use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -85,13 +85,14 @@ struct Library {
     books: Vec<Book>,
     active_id: Option<String>,
     settings: Settings,
+    tools: features::ReadingTools,
 }
 struct Store {
     library: Mutex<Library>,
     file: PathBuf,
     mode: Mutex<ReaderSession>,
     presentation: Mutex<ReaderView>,
-    #[cfg(any(target_os = "macos", windows))]
+    shortcut_edit: tauri::async_runtime::Mutex<()>,
     geometry_generation: std::sync::atomic::AtomicU64,
 }
 #[derive(Clone, Serialize)]
@@ -294,6 +295,7 @@ fn remove_book(app: tauri::AppHandle, id: String) -> Result<(), String> {
     let store = app.state::<Store>();
     let mut data = store.library.lock().unwrap();
     data.books.retain(|b| b.id != id);
+    data.tools.bookmarks.remove(&id);
     if data.active_id.as_ref() == Some(&id) {
         data.active_id = None;
         store.mode.lock().unwrap().reset("paused", None);
@@ -527,6 +529,13 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
+            features::reading_navigation,
+            features::save_bookmark,
+            features::remove_bookmark,
+            features::app_information,
+            features::open_log_directory,
+            features::export_diagnostics,
+            features::shortcuts::save_shortcuts,
             library,
             import_books,
             read_book,
@@ -558,7 +567,7 @@ fn main() {
                 file,
                 mode: Mutex::new(ReaderSession::new("paused")),
                 presentation: Mutex::new(ReaderView::default()),
-                #[cfg(any(target_os = "macos", windows))]
+                shortcut_edit: tauri::async_runtime::Mutex::new(()),
                 geometry_generation: std::sync::atomic::AtomicU64::new(u64::MAX),
             });
             let w = app.get_webview_window("reader").unwrap();
@@ -618,26 +627,13 @@ fn main() {
                     _ => {}
                 })
                 .build(app)?;
-            app.global_shortcut()
-                .on_shortcut("CommandOrControl+Shift+H", |app, _, event| {
-                    if event.state() == ShortcutState::Pressed {
-                        let mode = app.state::<Store>().mode.lock().unwrap().name.clone();
-                        let _ = set_mode(
-                            app.clone(),
-                            if mode == "paused" { "hover" } else { "paused" }.into(),
-                        );
-                    }
-                })?;
-            app.global_shortcut()
-                .on_shortcut("CommandOrControl+Shift+O", |app, _, event| {
-                    if event.state() == ShortcutState::Pressed {
-                        open_shelf(app);
-                    }
-                })?;
+            let bindings = app.state::<Store>().library.lock().unwrap().tools.shortcuts.clone();
+            features::shortcuts::install(app.handle(), &bindings);
             let handle = app.handle().clone();
             std::thread::spawn(move || {
                 #[cfg(any(target_os = "macos", windows))]
                 let mut geometry = reader_geometry::Protection::new();
+                let mut displays = features::displays::Tracker::new();
                 let mut previous: Option<(String, bool, u64)> = None;
                 let mut last_snapshot = Instant::now() - Duration::from_secs(5);
                 let mut last_poll = Instant::now();
@@ -647,6 +643,9 @@ fn main() {
                     let Some(w) = handle.get_webview_window("reader") else {
                         continue;
                     };
+                    if let Err(error) = displays.update(&w, &store) {
+                        diagnostics::record("display-layout-error", serde_json::json!({"error": error.to_string()}));
+                    }
                     #[cfg(any(target_os = "macos", windows))]
                     match geometry.reconcile(&w, &store) {
                         Ok(true) => {},
@@ -732,6 +731,14 @@ fn main() {
                         } else if let Err(error) = w.hide() {
                             diagnostics::record("hide-error", serde_json::json!({ "error": error.to_string() }));
                             continue;
+                        }
+                        #[cfg(target_os = "macos")]
+                        if matches!(state, "ready" | "setup")
+                            && previous.as_ref().is_none_or(|p| p.2 != generation)
+                        {
+                            // Explicit preview/tool requests may focus the reader;
+                            // ordinary hover transitions must never take focus.
+                            let _ = w.set_focus();
                         }
                         let view = store.presentation.lock().unwrap().publish(state);
                         if let Err(error) = w.emit("reader-state", &view) {
