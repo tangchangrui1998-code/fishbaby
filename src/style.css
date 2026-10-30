@@ -14,6 +14,59 @@
 body {
   margin: 0;
 }
+html:not(.reader-root) {
+  background: #f1f4e9 url("./assets/backend-landscape.png") right center / cover
+    no-repeat fixed;
+}
+body:not(.reader) {
+  color: #354333;
+}
+body:not(.reader) main {
+  min-height: 100vh;
+  background: linear-gradient(90deg, #fafcf640, #fafcf60a);
+}
+body:not(.reader) aside {
+  background: #f0f4e8d9;
+  border-right-color: #73846626;
+}
+body:not(.reader) aside nav .selected {
+  color: #344d36;
+  background: #dbe5d3b8;
+}
+body:not(.reader) aside nav button:hover {
+  background: #e0e9d8b8;
+}
+body:not(.reader) .brand span,
+body:not(.reader) #count {
+  color: #7b8872;
+}
+body:not(.reader) .toolbar {
+  color: #78866f;
+  border-bottom-color: #73846626;
+}
+body:not(.reader) .toolbar button,
+body:not(.reader) .book-meta {
+  color: #68765f;
+}
+body:not(.reader) button.primary {
+  background: #4a6347;
+  border-color: #4a6347;
+  color: #fff;
+}
+body:not(.reader) button.primary:hover {
+  background: #3e553b;
+  border-color: #3e553b;
+}
+body:not(.reader) .setting-group {
+  background: #fffffbdc;
+  border-color: #80946c33;
+}
+body:not(.reader)
+  .setting-group
+  input:not([type="range"]):not([type="checkbox"]),
+body:not(.reader) .setting-group select {
+  background-color: #fbfcf6e6;
+}
 button,
 input,
 select {
