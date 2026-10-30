@@ -126,9 +126,7 @@ function renderBooks() {
   list.innerHTML = books.length
     ? books
         .map((b) => {
-          const tone =
-            Array.from(b.title).reduce((n, c) => n + c.codePointAt(0)!, 0) % 4;
-          return `<article class="book"><button class="cover c${tone}" data-id="${b.id}" aria-label="阅读 ${esc(b.title)}"><strong>${esc(b.title)}</strong><span>${/\.epub$/i.test(b.path) ? "EPUB" : "TXT"}</span></button><div class="book-info"><h3 title="${esc(b.title)}">${esc(b.title)}</h3><div class="book-meta"><span>${b.available ? `${percent(b)}% · ${b.lastRead ? new Date(b.lastRead * 1000).toLocaleDateString("zh-CN") : "未读"}` : "文件不可用"}</span>${data.activeId === b.id ? '<span class="current">当前阅读</span>' : ""}</div><div class="progress" aria-hidden="true"><span style="width:${percent(b)}%"></span></div><div class="book-actions"><button class="read" data-id="${b.id}">${b.offset ? "继续阅读" : "阅读"}</button><button class="remove" data-remove="${b.id}" aria-label="将 ${esc(b.title)} 移出书架">移出</button></div></div></article>`;
+          return `<article class="book"><button class="cover" data-id="${b.id}" aria-label="阅读 ${esc(b.title)}"><strong>${esc(b.title)}</strong><span>${/\.epub$/i.test(b.path) ? "EPUB" : "TXT"}</span></button><div class="book-info"><h3 title="${esc(b.title)}">${esc(b.title)}</h3><div class="book-meta"><span>${b.available ? `${percent(b)}% · ${b.lastRead ? new Date(b.lastRead * 1000).toLocaleDateString("zh-CN") : "未读"}` : "文件不可用"}</span>${data.activeId === b.id ? '<span class="current">当前阅读</span>' : ""}</div><div class="progress" aria-hidden="true"><span style="width:${percent(b)}%"></span></div><div class="book-actions"><button class="read" data-id="${b.id}">${b.offset ? "继续阅读" : "阅读"}</button><button class="remove" data-remove="${b.id}" aria-label="将 ${esc(b.title)} 移出书架">移出</button></div></div></article>`;
         })
         .join("")
     : `<div class="empty"><h2>书架里还没有书</h2><p>导入本地 TXT 或 EPUB 文件，开始阅读。</p><button id="empty-import" class="primary">导入书籍</button></div>`;
