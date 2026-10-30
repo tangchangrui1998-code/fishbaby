@@ -74,51 +74,24 @@ aside {
   color: #999b9e;
   margin-top: 7px;
 }
-nav {
+aside > nav {
   display: grid;
   gap: 5px;
   margin-top: 39px;
 }
-nav button {
+aside nav button {
   border: 0;
   background: transparent;
   text-align: left;
   padding: 11px 15px;
   font-weight: 500;
 }
-nav .selected {
+aside nav .selected {
   background: #e6e6e2;
   color: #252628;
 }
-nav button:hover {
+aside nav button:hover {
   background: #eaeae7;
-}
-.side-bottom {
-  position: absolute;
-  bottom: 30px;
-  left: 31px;
-  right: 25px;
-  color: #929397;
-  font-size: 10px;
-}
-.side-bottom p {
-  font-size: 11px;
-  color: #747579;
-  margin-bottom: 14px;
-}
-.side-bottom dl {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 12px 6px;
-  line-height: 1.3;
-}
-.side-bottom dt,
-.side-bottom dd {
-  margin: 0;
-}
-.side-bottom dd {
-  font-size: 11px;
-  color: #717277;
 }
 main {
   margin-left: 172px;
@@ -326,89 +299,155 @@ header .primary {
 .empty button {
   font-size: 12px;
 }
+/* Settings share one label/control grid at every supported shelf width. */
+#preferences-view,
+#about-view {
+  max-width: 760px;
+}
+.settings-heading {
+  height: auto;
+  min-height: 62px;
+  margin-bottom: 28px;
+}
+.page-caption {
+  margin: 10px 0 0;
+  color: #898b88;
+  font-size: 12px;
+  line-height: 1.6;
+}
 .fields {
-  max-width: 620px;
+  display: grid;
+  gap: 24px;
 }
 .setting-group {
-  margin: 0 0 30px;
-  border: 1px solid #e6e6e2;
-  border-radius: 8px;
+  min-width: 0;
+  margin: 0;
+  border: 1px solid #e6e7e3;
+  border-radius: 10px;
+  background: #fff;
   overflow: hidden;
 }
 .setting-group h2 {
-  padding: 16px 19px;
-  background: #fafaf8;
-  border-bottom: 1px solid #ebebe8;
-  font-size: 12px;
+  padding: 22px 24px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #303632;
 }
 .setting-group label {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(112px, 1fr) minmax(0, 260px);
   align-items: center;
-  justify-content: space-between;
   gap: 24px;
-  padding: 15px 19px;
-  font-size: 12px;
-  border-bottom: 1px solid #f0f0ed;
-  min-height: 53px;
+  margin: 0 24px;
+  padding: 18px 0;
+  min-height: 68px;
+  border-bottom: 1px solid #f0f1ed;
+  font-size: 13px;
+  color: #515650;
 }
 .setting-group label:last-child {
   border-bottom: 0;
+  margin-bottom: 8px;
 }
 .setting-group label > span {
   display: flex;
   align-items: center;
-  gap: 12px;
-  color: #93959a;
-  font-size: 11px;
+  justify-content: flex-end;
+  gap: 16px;
+  min-width: 0;
+  color: #999d96;
+  font-size: 12px;
+}
+.setting-group label > :is(input, select) {
+  justify-self: end;
 }
 .setting-group output {
-  width: 26px;
+  flex: 0 0 40px;
   text-align: right;
-  color: #6b6e74;
+  color: #737a70;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 .setting-group input[type="range"] {
-  width: 135px;
-  accent-color: #626d70;
+  min-width: 0;
+  width: 100%;
+  max-width: 204px;
+  margin: 0;
+  accent-color: #637a65;
+  cursor: pointer;
+}
+.setting-group input[type="number"],
+.setting-group select,
+#shortcut-settings input {
+  min-height: 36px;
+  border: 1px solid #e0e3dc;
+  border-radius: 6px;
+  background: #fafbf8;
+  color: #414940;
+  padding: 8px 12px;
 }
 .setting-group input[type="number"] {
-  border: 1px solid #e1e1dd;
-  border-radius: 4px;
-  background: #fff;
-  color: inherit;
-  width: 80px;
-  padding: 5px 8px;
-}
-.setting-group input[type="color"] {
-  width: 31px;
-  height: 25px;
-  padding: 0;
-  border: 1px solid #dededb;
-  border-radius: 4px;
-  background: none;
-}
-.setting-group input[type="checkbox"] {
-  accent-color: #626d70;
+  width: 88px;
+  font-variant-numeric: tabular-nums;
 }
 .setting-group select {
-  min-width: 85px;
-  padding: 5px 8px;
-  border: 1px solid #e1e1dd;
-  border-radius: 4px;
+  width: 100%;
+  max-width: 260px;
+  cursor: pointer;
+}
+.setting-group input[type="color"] {
+  width: 40px;
+  height: 30px;
+  padding: 3px;
+  border: 1px solid #e0e3dc;
+  border-radius: 6px;
+  background: #fafbf8;
+  cursor: pointer;
+}
+.setting-group input[type="checkbox"] {
+  appearance: none;
+  width: 36px;
+  height: 22px;
+  margin: 0;
+  border-radius: 20px;
+  background: #d9ddd5;
+  position: relative;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.setting-group input[type="checkbox"]::before {
+  content: "";
+  display: block;
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  top: 3px;
+  left: 3px;
+  border-radius: 50%;
   background: #fff;
-  color: inherit;
+  box-shadow: 0 1px 3px #0002;
+  transition: transform 0.15s;
+}
+.setting-group input[type="checkbox"]:checked {
+  background: #637a65;
+}
+.setting-group input[type="checkbox"]:checked::before {
+  transform: translateX(14px);
 }
 .setting-action {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 14px 19px;
-  font-size: 11px;
-  color: #999b9f;
+  gap: 16px;
+  padding: 18px 24px 22px;
+  font-size: 12px;
+  color: #969b92;
 }
 .setting-action button {
-  font-size: 11px;
-  color: #62666d;
+  flex-shrink: 0;
+  font-size: 12px;
+  padding: 8px 12px;
+  color: #65715f;
 }
 #notice {
   white-space: pre-wrap;
@@ -668,35 +707,111 @@ header .primary {
   background: rgba(190, 160, 50, 0.3);
 }
 .setting-note {
-  color: #66736c;
+  color: #90958d;
   font-size: 12px;
-  line-height: 1.7;
+  line-height: 1.8;
+}
+.setting-group > .setting-note {
+  margin: 0 24px 12px;
 }
 .settings-actions {
   display: flex;
-  gap: 8px;
-  margin-top: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin: 18px 24px;
+}
+.settings-actions button {
+  min-height: 36px;
+  font-size: 12px;
+  padding: 8px 14px;
 }
 #shortcut-settings input {
-  width: 230px;
+  width: 100%;
+  min-width: 0;
   cursor: pointer;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 11px;
+}
+#shortcut-settings input:focus-visible {
+  background: #fff;
+}
+#shortcut-status {
+  margin: 0 24px 22px;
+  font-size: 11px;
+  color: #8b9384;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
 }
 #app-info {
   display: grid;
-  grid-template-columns: 90px 1fr;
-  gap: 10px;
-  font-size: 13px;
+  grid-template-columns: 90px minmax(0, 1fr);
+  gap: 14px;
+  margin: 6px 24px 22px;
+  font-size: 12px;
+  line-height: 1.7;
+}
+#app-info dt {
+  color: #92978e;
 }
 #app-info dd {
   margin: 0;
+  overflow-wrap: anywhere;
 }
 #about-view .setting-group {
   margin-bottom: 24px;
 }
-#log-directory {
+#log-directory,
+#display-layouts {
+  margin: 0 24px 18px;
   font-size: 12px;
+  color: #687461;
+  line-height: 1.8;
   overflow-wrap: anywhere;
+}
+@media (max-width: 850px) {
+  .setting-group label {
+    grid-template-columns: minmax(100px, 1fr) minmax(0, 224px);
+    gap: 20px;
+    margin-inline: 20px;
+  }
+  .setting-group h2 {
+    padding-inline: 20px;
+  }
+  .setting-action {
+    padding-inline: 20px;
+  }
+  .setting-group > .setting-note,
+  .settings-actions,
+  #shortcut-status {
+    margin-left: 20px;
+    margin-right: 20px;
+  }
+}
+@media (max-width: 580px) {
+  .setting-group label {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  .setting-group label > :is(input, select),
+  .setting-group label > span {
+    width: 100%;
+    max-width: none;
+    justify-self: stretch;
+  }
+  .setting-group label > input:is([type="checkbox"], [type="color"]) {
+    justify-self: start;
+  }
+  .setting-group label > input[type="checkbox"] {
+    width: 36px;
+  }
+  .setting-group label > input[type="color"] {
+    width: 40px;
+  }
+  .setting-action {
+    flex-wrap: wrap;
+  }
 }
 @media (max-width: 320px) {
   .reader #overlay {

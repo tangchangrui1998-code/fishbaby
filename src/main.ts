@@ -40,7 +40,6 @@ interface Library {
 }
 const root = document.querySelector<HTMLDivElement>("#app")!;
 const reader = new URLSearchParams(location.search).has("reader");
-const shortcutModifier = /Mac/.test(navigator.platform) ? "⌘" : "Ctrl";
 let data: Library = {
   books: [],
   activeId: null,
@@ -108,6 +107,13 @@ async function refresh() {
     (document.querySelector("#background") as HTMLInputElement).value = String(
       data.settings.background,
     );
+    for (const [id, value] of [
+      ["background", `${Math.round(data.settings.background * 100)}%`],
+      ["fontSize", data.settings.fontSize],
+      ["lineHeight", data.settings.lineHeight],
+    ] as const) {
+      document.getElementById(`${id}-value`)!.textContent = String(value);
+    }
   }
 }
 function percent(b: Book) {
@@ -166,7 +172,7 @@ async function importBooks() {
   });
 }
 function renderShelf() {
-  root.innerHTML = `<aside><div class="brand">隐阅<span>fishbaby</span></div><nav aria-label="主导航"><button class="selected" data-view="library" aria-current="page">书架</button><button data-view="preferences">阅读设置</button></nav><div class="side-bottom"><p>快捷键</p><dl><dt>暂停 / 继续</dt><dd>${shortcutModifier} ⇧ H</dd><dt>打开书架</dt><dd>${shortcutModifier} ⇧ O</dd></dl></div></aside><main><section id="library-view"><header><div class="heading"><h1>书架</h1><span id="count"></span></div><button id="import" class="primary">导入书籍</button></header><div class="toolbar"><span>最近阅读</span><div><button id="adjust">调整阅读区</button><button id="pause">暂停阅读</button></div></div><section id="books" aria-label="书籍"></section></section><section id="preferences-view" hidden><header><h1>阅读设置</h1></header><div class="fields"><section class="setting-group"><h2>外观</h2><label>主题<select id="theme"><option value="light" ${data.settings.theme === "light" ? "selected" : ""}>浅色</option><option value="dark" ${data.settings.theme === "dark" ? "selected" : ""}>深色</option></select></label><label>文字颜色<input id="color" type="color" value="${data.settings.color}"></label><label>背景不透明度<input id="background" type="range" min="0" max="1" step="0.05" value="${data.settings.background}"></label></section><section class="setting-group"><h2>排版</h2><label>字号<span><output id="fontSize-value">${data.settings.fontSize}</output><input id="fontSize" type="range" min="12" max="40" value="${data.settings.fontSize}"></span></label><label>行距<span><output id="lineHeight-value">${data.settings.lineHeight}</output><input id="lineHeight" type="range" min="1.2" max="2.5" step="0.1" value="${data.settings.lineHeight}"></span></label><label>滚轮设备<select id="wheelMode"><option value="mouse" ${data.settings.wheelMode !== "trackpad" ? "selected" : ""}>鼠标滚轮</option><option value="trackpad" ${data.settings.wheelMode === "trackpad" ? "selected" : ""}>触控板</option></select></label><label>单行阅读<input id="singleLine" type="checkbox" ${data.settings.singleLine ? "checked" : ""}></label></section><section class="setting-group"><h2>阅读窗口</h2><label>宽度<span><input id="width" type="number" min="220" max="1400" value="${data.settings.width}"> px</span></label><label>高度<span><input id="height" type="number" min="90" max="800" value="${data.settings.height}"> px</span></label><div class="setting-action"><span>拖动窗口顶部可调整位置</span><button id="reset">恢复居中</button></div></section></div></section><p id="notice" role="status" hidden></p></main>`;
+  root.innerHTML = `<aside><div class="brand">隐阅<span>fishbaby</span></div><nav aria-label="主导航"><button class="selected" data-view="library" aria-current="page">书架</button><button data-view="preferences">阅读设置</button></nav></aside><main><section id="library-view"><header><div class="heading"><h1>书架</h1><span id="count"></span></div><button id="import" class="primary">导入书籍</button></header><div class="toolbar"><span>最近阅读</span><div><button id="adjust">调整阅读区</button><button id="pause">暂停阅读</button></div></div><section id="books" aria-label="书籍"></section></section><section id="preferences-view" hidden><header class="settings-heading"><div><h1>阅读设置</h1><p class="page-caption">外观与排版设置会自动保存</p></div></header><div class="fields"><section class="setting-group"><h2>外观</h2><label>主题<select id="theme"><option value="light" ${data.settings.theme === "light" ? "selected" : ""}>浅色</option><option value="dark" ${data.settings.theme === "dark" ? "selected" : ""}>深色</option></select></label><label>文字颜色<input id="color" type="color" value="${data.settings.color}"></label><label>背景浓度<span><output id="background-value">${Math.round(data.settings.background * 100)}%</output><input id="background" type="range" min="0" max="1" step="0.05" value="${data.settings.background}"></span></label></section><section class="setting-group"><h2>排版</h2><label>字号<span><output id="fontSize-value">${data.settings.fontSize}</output><input id="fontSize" type="range" min="12" max="40" value="${data.settings.fontSize}"></span></label><label>行距<span><output id="lineHeight-value">${data.settings.lineHeight}</output><input id="lineHeight" type="range" min="1.2" max="2.5" step="0.1" value="${data.settings.lineHeight}"></span></label><label>滚轮设备<select id="wheelMode"><option value="mouse" ${data.settings.wheelMode !== "trackpad" ? "selected" : ""}>鼠标滚轮</option><option value="trackpad" ${data.settings.wheelMode === "trackpad" ? "selected" : ""}>触控板</option></select></label><label>单行阅读<input id="singleLine" type="checkbox" ${data.settings.singleLine ? "checked" : ""}></label></section><section class="setting-group"><h2>阅读窗口</h2><label>宽度<span><input id="width" type="number" min="220" max="1400" value="${data.settings.width}"> px</span></label><label>高度<span><input id="height" type="number" min="90" max="800" value="${data.settings.height}"> px</span></label><div class="setting-action"><span>拖动窗口顶部可调整位置</span><button id="reset">恢复居中</button></div></section></div></section><p id="notice" role="status" hidden></p></main>`;
   extras = shelfExtras(toast);
   void extras.refresh().catch(toast);
   document.querySelectorAll<HTMLButtonElement>("[data-view]").forEach(
@@ -188,7 +194,11 @@ function renderShelf() {
   document.querySelector(".fields")!.addEventListener("input", (event) => {
     const input = event.target as HTMLInputElement;
     const output = document.getElementById(`${input.id}-value`);
-    if (output) output.textContent = input.value;
+    if (output)
+      output.textContent =
+        input.id === "background"
+          ? `${Math.round(Number(input.value) * 100)}%`
+          : input.value;
   });
   document.querySelector("#import")!.addEventListener("click", importBooks);
   for (const [id, mode] of [
