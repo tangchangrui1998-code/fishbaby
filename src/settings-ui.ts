@@ -41,7 +41,7 @@ export function shelfExtras(notify: (message: unknown) => void) {
           `<label>${label}<input data-shortcut="${id}" aria-label="${label}快捷键" readonly placeholder="按下组合键"></label>`,
       )
       .join("") +
-    '<div class="settings-actions"><button id="shortcut-defaults">填入默认值</button><button id="save-shortcuts">保存快捷键</button></div><p id="shortcut-status" role="status"></p>';
+    '<div class="settings-actions"><button id="shortcut-defaults">填入默认值</button><button id="save-shortcuts" class="primary">保存快捷键</button></div><p id="shortcut-status" role="status"></p>';
   document.querySelector(".fields")!.append(group);
   const about = document.createElement("section");
   about.id = "about-view";
@@ -57,6 +57,17 @@ export function shelfExtras(notify: (message: unknown) => void) {
   fields().forEach(
     (input) =>
       (input.onkeydown = (event) => {
+        if (
+          event.key === "Tab" &&
+          !event.ctrlKey &&
+          !event.metaKey &&
+          !event.altKey
+        )
+          return;
+        if (event.key === "Escape") {
+          input.blur();
+          return;
+        }
         event.preventDefault();
         event.stopPropagation();
         if (["Control", "Meta", "Alt", "Shift"].includes(event.key)) return;
@@ -158,12 +169,6 @@ export function shelfExtras(notify: (message: unknown) => void) {
           )
           .join("；")
       : "在阅读窗口使用后自动记住布局";
-    const shelfKeys = document.querySelectorAll(".side-bottom dd");
-    ["toggle", "shelf"].forEach((action, i) => {
-      if (shelfKeys[i])
-        shelfKeys[i].textContent =
-          info.shortcuts.find((s) => s.action === action)?.key ?? "";
-    });
   }
   return { refresh };
 }
