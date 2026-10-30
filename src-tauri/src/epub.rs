@@ -1,4 +1,4 @@
-use crate::publication::{Publication, MAX_BYTES};
+use crate::publication::{Chapter, Publication, MAX_BYTES};
 use encoding_rs::Encoding;
 use percent_encoding::percent_decode_str;
 use roxmltree::Document;
@@ -138,6 +138,9 @@ pub(super) fn decode(raw: &[u8]) -> Result<Publication, String> {
         .find(|n| n.has_tag_name("spine"))
         .ok_or_else(|| INVALID.to_string())?;
     let mut text = String::new();
+    let mut locations = HashMap::new();
+    let mut fallback = vec![];
+    let mut units = 0;
     for reference in spine.children().filter(|n| n.has_tag_name("itemref")) {
         if reference.attribute("linear") == Some("no") {
             continue;
@@ -165,19 +168,144 @@ pub(super) fn decode(raw: &[u8]) -> Result<Publication, String> {
         let href = item.attribute("href").ok_or_else(|| INVALID.to_string())?;
         let path = resource_path(&package, href)?;
         let source = archive.required(&path)?;
-        let chapter = chapter_text(&source)?;
+        let (chapter, anchors) = chapter_with_anchors(&source)?;
         if chapter.is_empty() {
             continue;
         }
         if !text.is_empty() {
             text.push_str("\n\n");
+            units += 2;
         }
+        locations.insert(path.clone(), units);
+        for (anchor, offset) in anchors {
+            locations.insert(format!("{path}#{anchor}"), units + offset);
+        }
+        fallback.push(Chapter {
+            title: chapter
+                .lines()
+                .next()
+                .unwrap_or("未命名章节")
+                .chars()
+                .take(90)
+                .collect(),
+            offset: units,
+            level: 0,
+        });
+        units += chapter.encode_utf16().count();
         text.push_str(&chapter);
     }
     if text.is_empty() {
         return Err("此 EPUB 没有可阅读的正文，纯图片书暂不支持".into());
     }
-    Ok(Publication { title, text })
+    let mut chapters = vec![];
+    let nav = items.values().find(|item| {
+        item.attribute("properties")
+            .is_some_and(|p| p.split_whitespace().any(|p| p == "nav"))
+    });
+    let ncx = spine
+        .attribute("toc")
+        .and_then(|id| items.get(id))
+        .copied()
+        .or_else(|| {
+            items
+                .values()
+                .find(|item| item.attribute("media-type") == Some("application/x-dtbncx+xml"))
+                .copied()
+        });
+    if let Some(item) = nav.or(ncx.as_ref()) {
+        if let Some(href) = item.attribute("href") {
+            let toc_path = resource_path(&package, href)?;
+            if let Some(source) = archive.optional(&toc_path)? {
+                let links: Vec<(String, String, usize)> = if nav.is_some() {
+                    let html = Html::parse_document(&source);
+                    let nav_selector = scraper::Selector::parse("nav").unwrap();
+                    let selected = html.select(&nav_selector).find(|e| {
+                        e.value()
+                            .attr("epub:type")
+                            .is_some_and(|t| t.split_whitespace().any(|t| t == "toc"))
+                            || e.value().attr("role") == Some("doc-toc")
+                    });
+                    let anchors = scraper::Selector::parse("a[href]").unwrap();
+                    selected
+                        .map(|nav| {
+                            nav.select(&anchors)
+                                .map(|a| {
+                                    (
+                                        a.value().attr("href").unwrap().into(),
+                                        a.text().collect::<String>().trim().into(),
+                                        a.ancestors()
+                                            .filter_map(ElementRef::wrap)
+                                            .filter(|e| e.value().name() == "ol")
+                                            .count()
+                                            .saturating_sub(1),
+                                    )
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default()
+                } else if let Ok(doc) = Document::parse(&source) {
+                    doc.descendants()
+                        .filter(|n| n.has_tag_name("navPoint"))
+                        .filter_map(|n| {
+                            let href = n
+                                .children()
+                                .find(|c| c.has_tag_name("content"))?
+                                .attribute("src")?;
+                            let label = n
+                                .children()
+                                .find(|c| c.has_tag_name("navLabel"))?
+                                .descendants()
+                                .find(|c| c.has_tag_name("text"))?
+                                .text()?;
+                            Some((
+                                href.into(),
+                                label.trim().into(),
+                                n.ancestors()
+                                    .filter(|a| a.has_tag_name("navPoint"))
+                                    .count()
+                                    .saturating_sub(1),
+                            ))
+                        })
+                        .collect()
+                } else {
+                    vec![]
+                };
+                for (href, label, level) in links.into_iter().take(20000) {
+                    let raw_path = href.split('#').next().unwrap_or("");
+                    let target = if raw_path.is_empty() {
+                        toc_path.clone()
+                    } else {
+                        match resource_path(&toc_path, raw_path) {
+                            Ok(path) => path,
+                            Err(_) => continue,
+                        }
+                    };
+                    let anchor = href
+                        .split_once('#')
+                        .map(|(_, a)| percent_decode_str(a).decode_utf8_lossy().to_string());
+                    let key = anchor.map(|a| format!("{target}#{a}")).unwrap_or(target);
+                    if let Some(&offset) = locations.get(&key) {
+                        if !label.is_empty() {
+                            chapters.push(Chapter {
+                                title: label,
+                                offset,
+                                level: level.min(8),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if chapters.is_empty() {
+        chapters = fallback;
+    }
+    chapters.sort_by_key(|c| c.offset);
+    Ok(Publication {
+        title,
+        text,
+        chapters,
+    })
 }
 
 fn line_break(text: &mut String) {
@@ -188,7 +316,12 @@ fn line_break(text: &mut String) {
         text.push('\n');
     }
 }
-fn append_element(element: ElementRef<'_>, text: &mut String, depth: usize) -> Result<(), String> {
+fn append_element(
+    element: ElementRef<'_>,
+    text: &mut String,
+    anchors: &mut HashMap<String, usize>,
+    depth: usize,
+) -> Result<(), String> {
     if depth > 256 {
         return Err("EPUB 正文嵌套过深，无法读取".into());
     }
@@ -224,6 +357,9 @@ fn append_element(element: ElementRef<'_>, text: &mut String, depth: usize) -> R
     if block {
         line_break(text);
     }
+    if let Some(id) = value.attr("id").or_else(|| value.attr("name")) {
+        anchors.entry(id.into()).or_insert(text.len());
+    }
     for child in element.children() {
         match child.value() {
             Node::Text(content) => {
@@ -237,7 +373,9 @@ fn append_element(element: ElementRef<'_>, text: &mut String, depth: usize) -> R
                     }
                 }
             }
-            Node::Element(_) => append_element(ElementRef::wrap(child).unwrap(), text, depth + 1)?,
+            Node::Element(_) => {
+                append_element(ElementRef::wrap(child).unwrap(), text, anchors, depth + 1)?
+            }
             _ => (),
         }
     }
@@ -246,11 +384,36 @@ fn append_element(element: ElementRef<'_>, text: &mut String, depth: usize) -> R
     }
     Ok(())
 }
+#[cfg(test)]
 fn chapter_text(source: &str) -> Result<String, String> {
+    chapter_with_anchors(source).map(|(text, _)| text)
+}
+fn chapter_with_anchors(source: &str) -> Result<(String, HashMap<String, usize>), String> {
     let html = Html::parse_document(source);
     let mut text = String::new();
-    append_element(html.root_element(), &mut text, 0)?;
-    Ok(text.trim().to_string())
+    let mut anchors = HashMap::new();
+    append_element(html.root_element(), &mut text, &mut anchors, 0)?;
+    let leading = text.len() - text.trim_start().len();
+    let trimmed = text.trim().to_string();
+    let mut targets: Vec<_> = anchors
+        .into_iter()
+        .map(|(id, byte)| (byte.saturating_sub(leading).min(trimmed.len()), id))
+        .collect();
+    targets.sort_by_key(|(byte, _)| *byte);
+    let mut result = HashMap::new();
+    let mut targets = targets.into_iter().peekable();
+    let mut units = 0;
+    for (byte, c) in trimmed.char_indices() {
+        while targets.peek().is_some_and(|(target, _)| *target <= byte) {
+            let (_, id) = targets.next().unwrap();
+            result.insert(id, units);
+        }
+        units += c.len_utf16();
+    }
+    for (_, id) in targets {
+        result.insert(id, units);
+    }
+    Ok((trimmed, result))
 }
 
 #[cfg(test)]
@@ -281,6 +444,47 @@ mod tests {
         format!(
             r#"<package xmlns="http://www.idpf.org/2007/opf" version="{version}"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>测试书 &amp; 小说</dc:title></metadata><manifest><item id="second" href="text/a.xhtml" media-type="application/xhtml+xml"/><item id="first" href="../text/第一%20章.xhtml#start" media-type="application/xhtml+xml"/><item id="notes" href="missing.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="first"/><itemref idref="notes" linear="no"/><itemref idref="second"/></spine></package>"#
         )
+    }
+    #[test]
+    fn native_epub3_toc_and_epub2_ncx_resolve_fragment_offsets_after_emoji() {
+        for epub3 in [true, false] {
+            let toc_item = if epub3 {
+                r#"<item id="toc" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>"#
+            } else {
+                r#"<item id="toc" href="toc.ncx" media-type="application/x-dtbncx+xml"/>"#
+            };
+            let opf = format!(
+                r#"<package><metadata/><manifest><item id="body" href="body.xhtml" media-type="application/xhtml+xml"/>{toc_item}</manifest><spine toc="toc"><itemref idref="body"/></spine></package>"#
+            );
+            let toc = if epub3 {
+                r##"<html xmlns:epub="http://www.idpf.org/2007/ops"><body><nav epub:type="toc"><ol><li><a href="body.xhtml#b">第二节</a></li></ol></nav></body></html>"##
+            } else {
+                r##"<ncx><navMap><navPoint><navLabel><text>第二节</text></navLabel><content src="body.xhtml#b"/></navPoint></navMap></ncx>"##
+            };
+            let path = if epub3 {
+                "OPS/nav.xhtml"
+            } else {
+                "OPS/toc.ncx"
+            };
+            let raw = fixture(
+                &opf,
+                &[
+                    (
+                        "OPS/body.xhtml",
+                        r#"<html><body><p>😀开头</p><h2 id="b">真正标题</h2><p>正文</p></body></html>"#,
+                    ),
+                    (path, toc),
+                ],
+            );
+            let publication = decode(&raw).unwrap();
+            assert_eq!(publication.chapters.len(), 1);
+            assert_eq!(publication.chapters[0].title, "第二节");
+            let units: Vec<_> = publication.text.encode_utf16().collect();
+            assert!(
+                String::from_utf16_lossy(&units[publication.chapters[0].offset..])
+                    .starts_with("真正标题")
+            );
+        }
     }
     #[test]
     fn epub2_and_epub3_use_spine_order_metadata_and_relative_unicode_paths() {

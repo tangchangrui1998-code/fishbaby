@@ -40,6 +40,14 @@
       import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
       import { emit } from "@tauri-apps/api/event";
       window.isTauri = true;
+      if (new URLSearchParams(location.search).has("no-worker"))
+        window.Worker = class {
+          constructor() {
+            throw new DOMException("Worker unavailable", "SecurityError");
+          }
+        };
+      if (!new URLSearchParams(location.search).has("reader"))
+        document.querySelector("#fixture-controls").hidden = true;
       mockWindows("reader");
       const text = Array.from(
         { length: 500 },
@@ -81,8 +89,58 @@
       mockIPC(
         async (cmd, args) => {
           if (cmd === "library") return structuredClone(data);
+          if (cmd === "app_information")
+            return {
+              version: "0.1.8",
+              preview: true,
+              revision: "fixture",
+              builtAt: "1793322000",
+              platform: "mock",
+              architecture: "test",
+              logDirectory: "本地测试日志目录",
+              layouts: [{ display: "测试屏幕", width: 420, height: 260 }],
+              shortcuts: Object.entries(
+                data.bindings || {
+                  toggle: "CommandOrControl+Shift+H",
+                  shelf: "CommandOrControl+Shift+O",
+                  adjust: "CommandOrControl+Shift+J",
+                  previous: "CommandOrControl+Alt+Left",
+                  next: "CommandOrControl+Alt+Right",
+                },
+              ).map(([action, key]) => ({ action, key, active: true })),
+            };
+          if (cmd === "save_shortcuts") {
+            if (new Set(Object.values(args.bindings)).size !== 5)
+              throw "不同操作不能使用相同快捷键";
+            data.bindings = args.bindings;
+            await emit("library-changed", null);
+            return;
+          }
           if (cmd === "reader_state") return structuredClone(view);
           if (cmd === "current_text") return [structuredClone(book), text];
+          if (cmd === "reading_navigation")
+            return {
+              bookId: book.id,
+              chapters: [
+                { title: "第一章", offset: 0, level: 0 },
+                { title: "第二章", offset: 100, level: 0 },
+              ],
+              bookmarks: structuredClone(data.marks || []),
+            };
+          if (cmd === "save_bookmark") {
+            (data.marks ||= []).push({
+              id: String(Date.now()),
+              offset: args.offset,
+              label: args.label || "当前位置",
+              anchor: "",
+              createdAt: 0,
+            });
+            return;
+          }
+          if (cmd === "remove_bookmark") {
+            data.marks = (data.marks || []).filter((m) => m.id !== args.id);
+            return;
+          }
           if (cmd === "save_progress") {
             book.offset = args.offset;
             sessionStorage.setItem(

@@ -18,6 +18,10 @@ macOS / Windows 悬浮文字阅读器。鼠标悬停在阅读区域时显示文�
 - 字号、行距、文字颜色、底色浓度、单行模式和阅读区域尺寸设置。
 - 菜单栏入口；`⌘⇧H` 暂停/继续，`⌘⇧O` 打开书架。
 
+## 未发布的开发体验功能
+
+已完成正文留白、多屏布局记忆、快捷键设置、版本诊断、续读定位提示、章节目录、书签与跳转返回、书内搜索。本轮只更新源码，没有新安装包，旧安装包不包含这些功能。体验方式和限制见 [开发体验记录](docs/UNRELEASED.md)。
+
 ## 开发
 
 需要 Node.js 22、Rust 1.88+。macOS 另需 Xcode Command Line Tools；Windows 需 Visual Studio C++ Build Tools 和 WebView2。
